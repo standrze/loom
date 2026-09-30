@@ -89,3 +89,15 @@ import Testing
     #expect(buffer[4, 0].style.reversed)
     #expect(!buffer[2, 0].style.reversed)
 }
+
+@Test func separatelyInsertedCombiningMarksKeepCursorInsideText() {
+    var editor = LineEditor()
+    editor.insert("e")
+    editor.insert("\u{301}")
+    #expect(editor.text == "e\u{301}")
+    #expect(editor.cursor == 1)
+    editor.insert("!")
+    #expect(editor.text == "e\u{301}!")
+    editor.deleteBackward()
+    #expect(editor.text == "e\u{301}")
+}

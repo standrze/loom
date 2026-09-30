@@ -49,8 +49,10 @@ public struct LineEditor: Sendable {
         guard text.utf8.count - selectedBytes + sanitized.utf8.count <= 65_536 else { return }
         saveUndo(coalesce: coalescesInsertion && selection == nil)
         let range = selection ?? cursor..<cursor
-        text.replaceSubrange(indices(for: range), with: sanitized)
-        cursor = range.lowerBound + sanitized.count
+        let replacementRange = indices(for: range)
+        let prefix = String(text[..<replacementRange.lowerBound]) + sanitized
+        text.replaceSubrange(replacementRange, with: sanitized)
+        cursor = min(text.count, prefix.count)
         selectionAnchor = nil
         coalescesInsertion = true
         verticalColumn = nil
@@ -155,8 +157,10 @@ public struct LineEditor: Sendable {
         let range = (cursor - 1)..<cursor
         guard text.utf8.count - bytes(in: range) + sanitized.utf8.count <= 65_536 else { return }
         saveUndo()
-        text.replaceSubrange(indices(for: range), with: sanitized)
-        cursor = range.lowerBound + sanitized.count
+        let replacementRange = indices(for: range)
+        let prefix = String(text[..<replacementRange.lowerBound]) + sanitized
+        text.replaceSubrange(replacementRange, with: sanitized)
+        cursor = min(text.count, prefix.count)
         verticalColumn = nil
     }
 

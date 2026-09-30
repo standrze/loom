@@ -3,6 +3,8 @@
 /// Nested markup combines enabled attributes. A terminal-default color inherits
 /// its surrounding color so emphasis can retain the body's palette.
 public struct MarkdownPalette: Sendable {
+    /// Preserves source soft line breaks for applications with line-oriented transcripts.
+    public var preservesSoftBreaks = false
     public var body: Style
     public var heading: Style
     public var emphasis: Style

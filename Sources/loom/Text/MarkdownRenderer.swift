@@ -70,7 +70,7 @@ struct MarkdownRenderer {
             return splitLines(inlineChildren(paragraph, style: style))
         case let quote as BlockQuote:
             let lines = blockSequence(Array(quote.children), style: overlay(palette.quote, on: style))
-            return prefixed(lines, first: "│ ", continuation: "│ ", style: palette.quote)
+            return prefixed(lines, first: "│ ", continuation: "│ ", style: palette.quote, copyable: false)
         case let code as CodeBlock:
             return codeLines(code, style: style)
         case let list as UnorderedList:
@@ -93,8 +93,20 @@ struct MarkdownRenderer {
         let content = code.code.hasSuffix("\n") ? String(code.code.dropLast()) : code.code
         guard let headerStyle = palette.codeBlockHeader else {
             guard !code.code.isEmpty else { return [] }
+            let highlighted = palette.codeHighlighter?(content, code.language) ?? [TextSpan(content, style: codeStyle)]
+            let inlineSpans = highlighted.map { span in
+                let tokenStyle = span.style ?? codeStyle
+                return TextSpan(
+                    span.text,
+                    style: Style(
+                        foreground: tokenStyle.foreground == .terminalDefault
+                            ? codeStyle.foreground : tokenStyle.foreground,
+                        background: codeStyle.background,
+                        bold: tokenStyle.bold, italic: tokenStyle.italic,
+                        underlined: tokenStyle.underlined, reversed: tokenStyle.reversed))
+            }
             return prefixed(
-                splitLines([TextSpan(content, style: codeStyle)]),
+                splitLines(inlineSpans),
                 first: palette.codeBlockPrefix, continuation: palette.codeBlockPrefix, style: palette.quote)
         }
 
@@ -168,7 +180,7 @@ struct MarkdownRenderer {
         case let text as Markdown.Text:
             return [TextSpan(text.string, style: style, link: link)]
         case is SoftBreak:
-            return [TextSpan(" ", style: style, link: link)]
+            return [TextSpan(palette.preservesSoftBreaks ? "\n" : " ", style: style, link: link)]
         case is LineBreak:
             return [TextSpan("\n", style: style, link: link)]
         case is Strong:
@@ -197,14 +209,17 @@ struct MarkdownRenderer {
                     lines[lines.count - 1].append(
                         TextSpan(
                             String(text), style: span.style, link: span.link,
-                            codeBlock: span.codeBlock, isCodeBlockHeader: span.isCodeBlockHeader))
+                            codeBlock: span.codeBlock, isCodeBlockHeader: span.isCodeBlockHeader,
+                            copyable: span.copyable))
                 }
             }
         }
         return lines
     }
 
-    private func prefixed(_ lines: [Line], first: String, continuation: String, style: Style) -> [Line] {
+    private func prefixed(
+        _ lines: [Line], first: String, continuation: String, style: Style, copyable: Bool = true
+    ) -> [Line] {
         (lines.isEmpty ? [[]] : lines).enumerated().map { index, line in
             // Header and compact summary anchors stay one cell wide inside nested containers.
             guard !line.contains(where: { $0.isCodeBlockHeader || $0.codeBlock?.isCompact == true }) else {
@@ -212,7 +227,9 @@ struct MarkdownRenderer {
             }
             let code = line.first { $0.codeBlock != nil }
             return [
-                TextSpan(index == 0 ? first : continuation, style: code?.style ?? style, codeBlock: code?.codeBlock)
+                TextSpan(
+                    index == 0 ? first : continuation, style: code?.style ?? style,
+                    codeBlock: code?.codeBlock, copyable: copyable)
             ]
                 + line
         }

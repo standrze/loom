@@ -77,6 +77,19 @@ import Testing
     #expect(document.spans(for: thought)?.map(\.text).joined() == "private thought")
 }
 
+@Test func removingAnEntryPreservesLaterIdentitiesAndRebuildsRows() {
+    var document = TextDocument(width: 20)
+    let prompt = document.append("prompt")
+    let temporary = document.append("temporary")
+    let answer = document.append("answer")
+    document.remove(temporary)
+    #expect(document.entryIndex(for: temporary) == nil)
+    #expect(document.row(for: prompt) == 0)
+    #expect(document.row(for: answer) == 2)
+    #expect(document.entryID(at: 2) == answer)
+    #expect(document.rowCount == 3)
+}
+
 @Test func cachedDocumentNeedsNoLayoutWorkForScrollingAndSelection() {
     var document = TextDocument(width: 20)
     for i in 0..<100 {
@@ -259,8 +272,10 @@ import Testing
     var document = TextDocument(width: 40)
     let source = " \nfirst\nsecond\nthird\nfourth"
     let id = document.append(source)
-    document.setTailPreview(2, for: id, reservedHeaderRows: 1)
+    let muted = Style(foreground: .rgb(108, 108, 108))
+    document.setTailPreview(2, for: id, reservedHeaderRows: 1, omissionStyle: muted)
     #expect(document.layouts[0].lines.count == 4)
+    #expect(document.layouts[0].lines[1].glyphs.first?.style == muted)
     #expect(document.spans(for: id)?.map(\.text).joined() == source)
     #expect(document.find("first") == id)
     let selection = TextSelection(anchor: Point(x: 0, y: 0), head: Point(x: 40, y: 3))
@@ -271,6 +286,11 @@ import Testing
     document.resize(width: 3)
     #expect(document.layouts[0].lines.count == 4)
     #expect(document.layouts[0].source == source + "\nfifth")
+    document.restyle(
+        style: { style in
+            Style(foreground: style.foreground == muted.foreground ? .rgb(150, 150, 150) : style.foreground)
+        }, background: { $0 })
+    #expect(document.layouts[0].lines[1].glyphs.first?.style?.foreground == .rgb(150, 150, 150))
     document.setTailPreview(nil, for: id)
     #expect(document.layouts[0].lines.count > 4)
     #expect(document.layouts[0].source == source + "\nfifth")

@@ -127,6 +127,46 @@ import Testing
     #expect(layout.selectedText(selection) == "hello world wideword")
 }
 
+@Test func blockquoteCopyOmitsGeneratedRailsAndKeepsBlankLines() {
+    let layout = TextLayout(MarkdownText.spans("> QUOTE_A first\n>\n> QUOTE_B second"), width: 80)
+    let selection = TextSelection(
+        anchor: Point(x: 0, y: 0), head: Point(x: 79, y: layout.lines.count - 1))
+    #expect(layout.selectedText(selection) == "QUOTE_A first\n\nQUOTE_B second")
+    #expect(layout.wordSelection(at: Point(x: 0, y: 0)) == nil)
+}
+
+@Test func wrappedBlockquoteRepeatsDisplayRailWithoutCopyingIt() {
+    let source = "> alpha bravo charlie delta echo foxtrot golf hotel india"
+    let layout = TextLayout(MarkdownText.spans(source), width: 16, wrapping: .word)
+    #expect(layout.lines.count > 1)
+    for line in layout.lines {
+        #expect(line.glyphs.map(\.text).joined().hasPrefix("│ "))
+    }
+    let selection = TextSelection(
+        anchor: Point(x: 0, y: 0), head: Point(x: 15, y: layout.lines.count - 1))
+    #expect(layout.selectedText(selection) == "alpha bravo charlie delta echo foxtrot golf hotel india")
+}
+
+@Test func nestedWrappedBlockquoteRepeatsBothRails() {
+    let source = "> > Nested blockquote text that should also wrap properly"
+    let layout = TextLayout(MarkdownText.spans(source), width: 25, wrapping: .word)
+    #expect(layout.lines.count > 1)
+    for line in layout.lines {
+        #expect(line.glyphs.map(\.text).joined().hasPrefix("│ │ "))
+    }
+}
+
+@Test func literalBarsRemainCopyableInsideAndOutsideQuotes() {
+    let examples = ["│ literal tree line", "```\n│ box art\n```", "> │ box art"]
+    for source in examples {
+        let layout = TextLayout(MarkdownText.spans(source), width: 80)
+        let selection = TextSelection(
+            anchor: Point(x: 0, y: 0), head: Point(x: 79, y: layout.lines.count - 1))
+        let copied = layout.selectedText(selection)
+        #expect(copied.contains("│ box art") || copied.contains("│ literal"))
+    }
+}
+
 @Test func hyperlinksAreEmittedOnlyWhenEnabledAndAreClosed() throws {
     let layout = TextLayout([TextSpan("link", link: "https://example.com")], width: 10)
     var linked = Terminal(backend: MemoryBackend(), width: 10, height: 1, hyperlinks: true)
@@ -138,4 +178,11 @@ import Testing
     var plain = Terminal(backend: MemoryBackend(), width: 10, height: 1, hyperlinks: false)
     try plain.draw { frame in frame.render(Paragraph(layout), in: frame.area) }
     #expect(!String(decoding: plain.backend.writes[0], as: UTF8.self).contains("\u{1b}]8;"))
+}
+
+@Test func softBreakPreservationIsAnExplicitPaletteChoice() {
+    var palette = MarkdownPalette()
+    palette.preservesSoftBreaks = true
+    #expect(MarkdownText.spans("first\nsecond", palette: palette).map(\.text).joined() == "first\nsecond")
+    #expect(MarkdownText.spans("first\nsecond").map(\.text).joined() == "first second")
 }

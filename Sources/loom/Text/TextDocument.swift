@@ -29,9 +29,12 @@ public struct TextDocument: Sendable {
         var collapsedSummary: [TextSpan]?
         var widthLimit: Int?
         var trailingReservedColumns = 0
+        var displayPrefix: TextSpan?
+        var continuationPrefix = ""
         var tailRows: Int?
         var headRows: Int?
         var reservedHeaderRows = 0
+        var tailOmissionStyle: Style?
         var hidden = false
     }
 
@@ -87,6 +90,15 @@ public struct TextDocument: Sendable {
         layoutBuildCount += 1
         rebuildStarts(after: index - 1)
         return id
+    }
+
+    /// Removes an entry while leaving every other entry identity unchanged.
+    public mutating func remove(_ id: TextDocumentEntryID) {
+        guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
+        entries.remove(at: index)
+        layouts.remove(at: index)
+        starts.remove(at: index)
+        rebuildStarts(after: index - 1)
     }
 
     /// Replaces the last entry, or appends it when the document is empty.
@@ -157,6 +169,21 @@ public struct TextDocument: Sendable {
         rebuildStarts(after: index)
     }
 
+    /// Adds a visible, non-copyable prefix to each display line of an entry.
+    ///
+    /// Wrapped and explicit new lines use the continuation prefix. The stored spans,
+    /// search text, and copied selections remain the original source.
+    public mutating func setDisplayPrefix(
+        _ prefix: TextSpan, continuation: String, for id: TextDocumentEntryID
+    ) {
+        guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
+        entries[index].displayPrefix = TextSpan(prefix.text, style: prefix.style, copyable: false)
+        entries[index].continuationPrefix = continuation
+        layouts[index] = makeLayout(entries[index])
+        layoutBuildCount += 1
+        rebuildStarts(after: index)
+    }
+
     /// Shows a one-line summary in place of an entry while retaining its full source.
     public mutating func setCollapsed(
         _ collapsed: Bool, for id: TextDocumentEntryID, summary: [TextSpan] = [TextSpan("▶ Collapsed")]
@@ -188,13 +215,19 @@ public struct TextDocument: Sendable {
     /// Limits expanded presentation to the last wrapped rows; nil restores all rows.
     ///
     /// Full source remains available through spans and search, including after resize.
-    public mutating func setTailPreview(_ rows: Int?, for id: TextDocumentEntryID, reservedHeaderRows: Int = 0) {
+    public mutating func setTailPreview(
+        _ rows: Int?, for id: TextDocumentEntryID, reservedHeaderRows: Int = 0, omissionStyle: Style? = nil
+    ) {
         guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
         let rows = rows.map { max(1, $0) }
         let headers = max(0, reservedHeaderRows)
-        guard entries[index].tailRows != rows || entries[index].reservedHeaderRows != headers else { return }
+        guard
+            entries[index].tailRows != rows || entries[index].reservedHeaderRows != headers
+                || entries[index].tailOmissionStyle != omissionStyle
+        else { return }
         entries[index].tailRows = rows
         entries[index].reservedHeaderRows = headers
+        entries[index].tailOmissionStyle = omissionStyle
         layouts[index] = makeLayout(entries[index])
         layoutBuildCount += 1
         rebuildStarts(after: index)
@@ -288,6 +321,8 @@ public struct TextDocument: Sendable {
             entries[index].collapsedSummary = entries[index].collapsedSummary?.map {
                 restyled($0, using: transformStyle)
             }
+            entries[index].tailOmissionStyle = entries[index].tailOmissionStyle.map(transformStyle)
+            entries[index].displayPrefix = entries[index].displayPrefix.map { restyled($0, using: transformStyle) }
             entries[index].background = transformBackground(entries[index].background)
         }
         layouts = entries.map { makeLayout($0) }
@@ -374,19 +409,20 @@ public struct TextDocument: Sendable {
             return layout.headPreview(rows: rows, verticalPadding: entry.verticalPadding)
         }
         guard let rows = entry.tailRows else { return layout }
-        return layout.tailPreview(rows: rows, reservedHeaderRows: entry.reservedHeaderRows)
+        return layout.tailPreview(
+            rows: rows, reservedHeaderRows: entry.reservedHeaderRows, omissionStyle: entry.tailOmissionStyle)
     }
 
     private func restyled(_ span: TextSpan, using transform: (Style) -> Style) -> TextSpan {
         TextSpan(
             span.text, style: span.style.map(transform), link: span.link,
-            codeBlock: span.codeBlock, isCodeBlockHeader: span.isCodeBlockHeader)
+            codeBlock: span.codeBlock, isCodeBlockHeader: span.isCodeBlockHeader, copyable: span.copyable)
     }
 
     private func fullLayout(_ entry: Entry) -> TextLayout {
         let available = max(1, width - entry.trailingReservedColumns)
         let width = min(available, entry.widthLimit ?? available)
-        let spans = entry.collapsedSummary ?? entry.spans
+        let spans = presentationSpans(entry.collapsedSummary ?? entry.spans, for: entry)
         guard entry.background != .terminalDefault else {
             return TextLayout(spans, width: width, wrapping: entry.wrapping).paddedVertically(entry.verticalPadding)
         }
@@ -395,9 +431,30 @@ public struct TextDocument: Sendable {
             if style.background == .terminalDefault { style.background = entry.background }
             return TextSpan(
                 span.text, style: style, link: span.link,
-                codeBlock: span.codeBlock, isCodeBlockHeader: span.isCodeBlockHeader)
+                codeBlock: span.codeBlock, isCodeBlockHeader: span.isCodeBlockHeader, copyable: span.copyable)
         }
         return TextLayout(filled, width: width, wrapping: entry.wrapping).paddedVertically(entry.verticalPadding)
+    }
+
+    private func presentationSpans(_ spans: [TextSpan], for entry: Entry) -> [TextSpan] {
+        guard let prefix = entry.displayPrefix else { return spans }
+        var result = [prefix]
+        for span in spans {
+            let parts = span.text.components(separatedBy: "\n")
+            for (index, part) in parts.enumerated() {
+                if index > 0 {
+                    result.append(TextSpan("\n", style: span.style, copyable: span.copyable))
+                    result.append(TextSpan(entry.continuationPrefix, style: prefix.style, copyable: false))
+                }
+                if !part.isEmpty {
+                    result.append(
+                        TextSpan(
+                            part, style: span.style, link: span.link, codeBlock: span.codeBlock,
+                            isCodeBlockHeader: span.isCodeBlockHeader, copyable: span.copyable))
+                }
+            }
+        }
+        return result
     }
 
     private mutating func rebuildStarts(after index: Int) {

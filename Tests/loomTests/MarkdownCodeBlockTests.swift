@@ -190,3 +190,26 @@ private let codePanelPalette = MarkdownPalette(code: codePanelStyle, codeBlockHe
     #expect(spans.allSatisfy { $0.codeBlock == nil })
     #expect(!TextCodeBlock(id: 0, code: "code").isCompact)
 }
+
+@Test func inlineFencedCodeUsesTheSuppliedHighlighterWithoutCreatingACard() throws {
+    var palette = MarkdownPalette(
+        body: Style(foreground: .rgb(200, 200, 200), background: .rgb(20, 20, 20)),
+        code: Style(foreground: .rgb(170, 170, 170), background: .rgb(28, 28, 28)),
+        codeBlockPrefix: "  ")
+    palette.codeHighlighter = { code, language in
+        guard language == "go", code == "go run()" else { return [TextSpan(code)] }
+        return [
+            TextSpan("go", style: Style(foreground: .rgb(30, 160, 200), background: .rgb(99, 99, 99), bold: true)),
+            TextSpan(" run()", style: Style(foreground: .terminalDefault)),
+        ]
+    }
+    let spans = MarkdownText.spans("```go\ngo run()\n```", palette: palette)
+    #expect(spans.map(\.text).joined() == "  go run()")
+    #expect(spans.allSatisfy { $0.codeBlock == nil && !$0.isCodeBlockHeader })
+    let keyword = try #require(spans.first(where: { $0.text == "go" }))
+    #expect(keyword.style?.foreground == .rgb(30, 160, 200))
+    #expect(keyword.style?.background == .rgb(28, 28, 28))
+    #expect(keyword.style?.bold == true)
+    let plain = try #require(spans.first(where: { $0.text == " run()" }))
+    #expect(plain.style?.foreground == .rgb(170, 170, 170))
+}

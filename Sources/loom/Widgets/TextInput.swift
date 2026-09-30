@@ -18,6 +18,9 @@ public struct TextInput: Widget {
     public var horizontalPadding = 1
     public var textColor = Color.terminalDefault
     public var placeholderColor = Color.indexed(8)
+    /// Dim completion text painted after the draft cursor without changing the editor.
+    public var ghostText: String?
+    public var ghostColor = Color.indexed(8)
 
     /// The prompt marker's foreground, or nil to use the editable text color.
     public var promptColor: Color?
@@ -78,8 +81,8 @@ public struct TextInput: Widget {
 
         if editor.text.isEmpty {
             Paragraph(
-                TextLayout(placeholder, width: content.width),
-                style: carryingFill(Style(foreground: placeholderColor))
+                TextLayout(ghostText ?? placeholder, width: content.width),
+                style: carryingFill(Style(foreground: ghostText == nil ? placeholderColor : ghostColor))
             )
             .render(in: content, buffer: &buffer)
         } else {
@@ -87,6 +90,18 @@ public struct TextInput: Widget {
             let scroll = max(0, cursor.y - content.height + 1)
             Paragraph(text, scroll: scroll, style: carryingFill(Style(foreground: textColor)))
                 .render(in: content, buffer: &buffer)
+            if let ghostText, editor.selection == nil, editor.cursor == editor.text.count,
+                cursor.y >= scroll, cursor.y - scroll < content.height, cursor.x < content.width
+            {
+                Paragraph(
+                    TextLayout(ghostText, width: content.width - cursor.x),
+                    style: carryingFill(Style(foreground: ghostColor))
+                )
+                .render(
+                    in: Rect(
+                        x: content.x + cursor.x, y: content.y + cursor.y - scroll,
+                        width: content.width - cursor.x, height: 1), buffer: &buffer)
+            }
             if let selection = editor.selection {
                 let lower = text.source.index(text.source.startIndex, offsetBy: selection.lowerBound)
                 let upper = text.source.index(text.source.startIndex, offsetBy: selection.upperBound)

@@ -19,6 +19,33 @@ import Testing
     #expect(buffer[22, 3].symbol == "│")
 }
 
+@Test func textInputGhostStaysDimAndOutsideTheEditableDraft() {
+    var editor = LineEditor()
+    editor.insert("run ")
+    var input = TextInput(editor)
+    input.ghostText = "the tests"
+    input.ghostColor = .rgb(108, 108, 108)
+    let area = Rect(width: 30, height: input.height(width: 30))
+    let content = input.contentArea(in: area)
+    var buffer = Buffer(width: 30, height: area.height)
+    input.render(in: area, buffer: &buffer)
+
+    #expect(editor.text == "run ")
+    #expect(input.cursor(in: area) == Point(x: content.x + 4, y: content.y))
+    #expect(buffer[content.x, content.y].symbol == "r")
+    #expect(buffer[content.x + 4, content.y].symbol == "t")
+    #expect(buffer[content.x + 4, content.y].style.foreground == .rgb(108, 108, 108))
+
+    editor.reset()
+    input = TextInput(editor, placeholder: "type here")
+    input.ghostText = "run the tests"
+    input.ghostColor = .rgb(108, 108, 108)
+    buffer.reset()
+    input.render(in: area, buffer: &buffer)
+    #expect(buffer[content.x, content.y].symbol == "r")
+    #expect(buffer[content.x, content.y].style.foreground == .rgb(108, 108, 108))
+}
+
 @Test func textInputPaintsFillOnTheCornerSideAndText() {
     var editor = LineEditor()
     editor.insert("Hi")

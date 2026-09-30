@@ -26,3 +26,12 @@ import Testing
     #expect(layout.selectedText(backward) == text)
     #expect(layout.lines.count > text.split(separator: "\n", omittingEmptySubsequences: false).count)
 }
+
+@Test func tabUsesFourDisplaySpacesWithoutChangingCopiedSource() {
+    let layout = TextLayout("ab\tz", width: 12)
+    let line = layout.lines[0]
+    #expect(line.glyphs.map(\.text).joined() == "ab    z")
+    #expect(line.glyphs.last?.column == 6)
+    let selection = TextSelection(anchor: Point(x: 0, y: 0), head: Point(x: 6, y: 0))
+    #expect(layout.selectedText(selection) == "ab\tz")
+}

@@ -50,13 +50,13 @@ import Testing
     #expect(buffer[3, 0].symbol == " ")
 }
 
-@Test func characterArtSharesTabStopsControlFilteringAndGraphemeGeometry() {
+@Test func characterArtUsesFourSpaceTabsControlFilteringAndGraphemeGeometry() {
     let art = CharacterArt("A\tB\u{07}\u{1B}\u{009B}\ne\u{0301}\tC")
-    #expect(art.width == 5)
+    #expect(art.width == 6)
     #expect(art.height == 2)
-    var buffer = Buffer(width: 5, height: 2)
+    var buffer = Buffer(width: 6, height: 2)
     art.render(in: buffer.area, buffer: &buffer)
-    #expect(buffer.plainText == "A   B\ne\u{0301}   C")
+    #expect(buffer.plainText == "A    B\ne\u{0301}    C")
     #expect(buffer[0, 1].width == 1)
 }
 
