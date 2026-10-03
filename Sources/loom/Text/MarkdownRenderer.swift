@@ -156,7 +156,7 @@ struct MarkdownRenderer {
             }
             let marker = start.map { "\($0 + UInt(index)). " } ?? "• "
             let checkbox: String
-            switch (item as? ListItem)?.checkbox {
+            switch (item as? Markdown.ListItem)?.checkbox {
             case .checked: checkbox = "[x] "
             case .unchecked: checkbox = "[ ] "
             case nil: checkbox = ""
@@ -246,7 +246,7 @@ struct MarkdownRenderer {
     private func lastContentLine(_ block: any Markup) -> Int {
         // Container ranges can include the blank line after their final child.
         // Use the child boundary so the next paragraph does not lose that gap.
-        if block is ListItem || block is OrderedList || block is UnorderedList || block is BlockQuote,
+        if block is Markdown.ListItem || block is OrderedList || block is UnorderedList || block is BlockQuote,
             let child = Array(block.children).last
         {
             return lastContentLine(child)
