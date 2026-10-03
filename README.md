@@ -15,7 +15,8 @@ writes the changes through [weft](https://github.com/standrze/weft).
 | Rendering | Double-buffered frames, cell diffs, cursor updates, synchronized output |
 | Text | Unicode cell geometry, wrapping, selection, editable documents, undo/redo |
 | Content | Markdown rendered with Swift Markdown, styled spans, code blocks |
-| Widgets | Panels, menus, popup menus, paragraphs, text inputs, document views |
+| Widgets | Lists, tables, scrollbars, panels, menus, text inputs, document views |
+| Interaction | Stable selection, multiselect, scrolling, focus scopes, key bindings and help |
 | Detail | Character art, color blending, symbol animation, terminal color fallbacks |
 
 Your application owns state and event handling. loom owns the frame.
@@ -66,6 +67,11 @@ swift run loom-demo
 Type to change the displayed text. Press **Escape** or **Ctrl-C** to exit.
 See [the example](Examples/Demo/Demo.swift) and [architecture](Documentation/Architecture.md).
 
+For a searchable table browser with a category list, keyboard/mouse navigation,
+multiselect, and modal focus, run `swift run loom-browser`.
+See [collections and interaction](Documentation/Collections.md) for the APIs and
+[the browser example](Examples/Browser/BrowserApplication.swift) for application-owned event routing.
+
 ## Development
 
 ```sh
@@ -73,6 +79,8 @@ scripts/check-format.sh
 swift test
 swift build --product loom-demo
 python3 scripts/smoke.py .build/debug/loom-demo
+swift build --product loom-browser
+python3 scripts/smoke-browser.py .build/debug/loom-browser
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Version `0.1.0` is an early extraction

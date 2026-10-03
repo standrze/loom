@@ -1,0 +1,115 @@
+import Testing
+
+@testable import loom
+
+@Test func scrollingClampsPagesAndRevealsWithoutOverflow() {
+    var state = ScrollState(contentLength: 100, viewportLength: 10)
+    state.scroll(by: 12)
+    #expect(state.visibleRange == 12..<22)
+    state.scrollPage(by: 2)
+    #expect(state.offset == 32)
+    state.reveal(35..<38)
+    #expect(state.offset == 32)
+    state.reveal(48..<51)
+    #expect(state.offset == 41)
+    state.reveal(10..<30)
+    #expect(state.offset == 10)
+    state.scroll(by: Int.max)
+    #expect(state.offset == 90)
+    state.scroll(by: Int.min)
+    #expect(state.offset == 0)
+    state.scrollPage(by: Int.max)
+    #expect(state.offset == 90)
+    state.scrollPage(by: Int.min)
+    #expect(state.offset == 0)
+    state.update(contentLength: -1, viewportLength: -1)
+    #expect(state.visibleRange.isEmpty)
+    #expect(state.offset == 0)
+}
+
+@Test func logFollowingStopsOnUserScrollAndResumesExplicitly() {
+    var state = ScrollState(contentLength: 20, viewportLength: 5, followsEnd: true)
+    #expect(state.offset == 15)
+    state.update(contentLength: 30, viewportLength: 5)
+    #expect(state.offset == 25)
+    state.scroll(by: -3)
+    state.update(contentLength: 40, viewportLength: 5)
+    #expect(state.offset == 22)
+    #expect(!state.followsEnd)
+    state.scrollToEnd(follow: true)
+    state.update(contentLength: 45, viewportLength: 10)
+    #expect(state.offset == 35)
+    state.update(contentLength: 2, viewportLength: 10)
+    #expect(state.offset == 0)
+    #expect(state.isAtEnd)
+}
+
+@Test func viewportNavigationDoesNotStealModifiedOrReleasedKeys() {
+    var state = ScrollState(contentLength: 30, viewportLength: 5)
+    #expect(state.handle(.key(.pageDown)) == true)
+    #expect(state.offset == 5)
+    #expect(state.handle(.keyEvent(KeyEvent(key: .down, modifiers: .control))) == false)
+    #expect(state.handle(.keyEvent(KeyEvent(key: .down, kind: .release))) == false)
+    #expect(state.handle(.paste("j")) == false)
+    #expect(state.offset == 5)
+    #expect(state.handle(.mouse(MouseEvent(kind: .wheelDown, position: Point(x: 0, y: 0)))) == true)
+    #expect(state.offset == 8)
+    #expect(state.handle(.key(.right), axis: .horizontal) == true)
+    #expect(state.offset == 9)
+}
+
+@Test func scrollbarRendersAndDragsUsingSharedThumbGeometry() {
+    var state = ScrollState(contentLength: 100, viewportLength: 20, offset: 40)
+    let bar = Scrollbar(state)
+    let area = Rect(x: 2, y: 1, width: 1, height: 10)
+    #expect(bar.thumbRange(length: 10) == 4..<6)
+    var buffer = Buffer(width: 5, height: 12)
+    bar.render(in: area, buffer: &buffer)
+    #expect(buffer[2, 5].symbol == "█")
+    #expect(buffer[2, 6].symbol == "█")
+    #expect(buffer[2, 7].symbol == "│")
+    var drag: ScrollbarDrag?
+    #expect(bar.handle(MouseEvent(kind: .down, position: Point(x: 2, y: 6)), in: area, state: &state, drag: &drag))
+    #expect(drag != nil)
+    #expect(bar.handle(MouseEvent(kind: .drag, position: Point(x: 9, y: 50)), in: area, state: &state, drag: &drag))
+    #expect(state.offset == 80)
+    #expect(bar.handle(MouseEvent(kind: .up, position: Point(x: 9, y: 50)), in: area, state: &state, drag: &drag))
+    #expect(drag == nil)
+    #expect(bar.handle(MouseEvent(kind: .down, position: Point(x: 2, y: 1)), in: area, state: &state, drag: &drag))
+    #expect(state.offset == 60)
+}
+
+@Test func horizontalAndDegenerateScrollbarsRemainBounded() {
+    let state = ScrollState(contentLength: Int.max, viewportLength: 1, offset: Int.max - 1)
+    let bar = Scrollbar(state, direction: .horizontal)
+    #expect(bar.thumbRange(length: 10) == 9..<10)
+    #expect(bar.thumbRange(length: 0).isEmpty)
+    var buffer = Buffer(width: 10, height: 2)
+    bar.render(in: buffer.area, buffer: &buffer)
+    #expect(buffer[9, 0].symbol == "█")
+    #expect(buffer[9, 1].symbol == " ")
+    let unneeded = Scrollbar(ScrollState(contentLength: 1, viewportLength: 5))
+    buffer.reset()
+    unneeded.render(in: buffer.area, buffer: &buffer)
+    let allBlank = buffer.plainText.allSatisfy(\.isWhitespace)
+    #expect(allBlank)
+}
+
+@Test func twoAxisViewportClipsWholeGraphemesAndMapsHits() {
+    var content = Buffer(width: 8, height: 3)
+    content.put("中", width: 2, at: Point(x: 0, y: 1))
+    content.put("A", width: 1, at: Point(x: 2, y: 1), style: Style(bold: true), link: "https://example.com")
+    content.put("界", width: 2, at: Point(x: 3, y: 1))
+    let view = ScrollView(content, horizontalOffset: 1, verticalOffset: 1)
+    let area = Rect(x: 1, y: 1, width: 3, height: 1)
+    var buffer = Buffer(width: 6, height: 3)
+    view.render(in: area, buffer: &buffer)
+    #expect(buffer[1, 1].symbol == " ")
+    #expect(buffer[2, 1].symbol == "A")
+    #expect(buffer[2, 1].style.bold)
+    #expect(buffer[2, 1].link == "https://example.com")
+    #expect(buffer[3, 1].symbol == " ")
+    #expect(buffer[4, 1].symbol == " ")
+    #expect(view.contentPoint(at: Point(x: 2, y: 1), in: area) == Point(x: 2, y: 1))
+    #expect(view.contentPoint(at: Point(x: 4, y: 1), in: area) == nil)
+}

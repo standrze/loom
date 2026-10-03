@@ -6,6 +6,7 @@ public struct Buffer: Sendable {
     public let height: Int
 
     private var cells: [Cell]
+    private var clip: Rect
 
     public var area: Rect {
         Rect(width: width, height: height)
@@ -26,6 +27,7 @@ public struct Buffer: Sendable {
         self.width = max(0, width)
         self.height = max(0, height)
         self.cells = Array(repeating: Cell(), count: self.width * self.height)
+        self.clip = Rect(width: self.width, height: self.height)
     }
 
     /// Accesses a cell at valid, zero-based buffer coordinates.
@@ -42,6 +44,20 @@ public struct Buffer: Sendable {
         }
     }
 
+    /// Restricts writes to the intersection of this area and any enclosing clip.
+    ///
+    /// Coordinates remain absolute. Whole graphemes crossing an edge are omitted.
+    public mutating func withClip(_ area: Rect, _ draw: (inout Buffer) -> Void) {
+        let previous = clip
+        let left = max(clip.x, area.x)
+        let top = max(clip.y, area.y)
+        clip = Rect(
+            x: left, y: top, width: max(0, min(clip.maxX, area.maxX) - left),
+            height: max(0, min(clip.maxY, area.maxY) - top))
+        defer { clip = previous }
+        draw(&self)
+    }
+
     /// Writes a whole grapheme or nothing, preventing half-wide characters at a clip edge.
 
     public mutating func put(
@@ -49,8 +65,8 @@ public struct Buffer: Sendable {
     ) {
         guard symbol.count == 1,
             span == 1 || span == 2,
-            area.contains(point),
-            point.x + span <= width
+            clip.contains(point),
+            point.x + span <= clip.maxX
         else {
             return
         }
@@ -78,7 +94,7 @@ public struct Buffer: Sendable {
     /// Highlights the entire grapheme occupying the selected cell.
 
     public mutating func highlight(at point: Point) {
-        guard area.contains(point) else {
+        guard clip.contains(point) else {
             return
         }
 
@@ -88,6 +104,7 @@ public struct Buffer: Sendable {
         }
 
         let span = self[leadingColumn, point.y].width
+        guard leadingColumn >= clip.x, leadingColumn + span <= clip.maxX else { return }
         for column in leadingColumn..<min(width, leadingColumn + span) {
             cells[point.y * width + column].style.reversed = true
         }
