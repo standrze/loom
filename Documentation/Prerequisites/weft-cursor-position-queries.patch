@@ -1,0 +1,515 @@
+From cc4a74f482600b252be7858251da6a71efc8574d Mon Sep 17 00:00:00 2001
+From: Stephen Andrzejewski <sandrzejewski@berkeley.edu>
+Date: Tue, 13 Oct 2026 10:39:14 -0400
+Subject: [PATCH] Add bounded cursor position queries through the existing
+ input reader
+
+---
+ Documentation/CursorQueries.md               | 40 +++++++++++
+ Examples/Demo/Demo.swift                     |  4 ++
+ Sources/weft/CursorPositionQueryResult.swift | 19 +++++
+ Sources/weft/InputDecoder.swift              | 17 +++++
+ Sources/weft/InputEvent.swift                |  1 +
+ Sources/weft/TerminalError.swift             |  1 +
+ Sources/weft/TerminalEvents.swift            | 25 +++++++
+ Sources/weft/TerminalSession.swift           | 73 +++++++++++++++++--
+ Tests/weftTests/TerminalSessionTests.swift   | 76 ++++++++++++++++++++
+ scripts/smoke-cursor.py                      | 64 +++++++++++++++++
+ 10 files changed, 316 insertions(+), 4 deletions(-)
+ create mode 100644 Documentation/CursorQueries.md
+ create mode 100644 Sources/weft/CursorPositionQueryResult.swift
+ create mode 100644 scripts/smoke-cursor.py
+
+diff --git a/Documentation/CursorQueries.md b/Documentation/CursorQueries.md
+new file mode 100644
+index 0000000..8437f51
+--- /dev/null
++++ b/Documentation/CursorQueries.md
+@@ -0,0 +1,40 @@
++# Cursor-position queries
++
++`TerminalSession.requestCursorPosition(timeoutMilliseconds:)` sends ANSI DSR 6
++through the session output driver and returns a UUID. At most one query may be
++pending; a second request throws `cursorPositionQueryAlreadyPending`. Durations
++are clamped to 1...60,000 milliseconds and measured with monotonic uptime.
++
++Consume `InputEvent.cursorPositionQuery(result)` through the same `poll` or
++`TerminalEvents.events` path that receives keyboard and resize events. A result
++contains the original ID and `.position(Point)`, `.timedOut`, or `.cancelled`.
++Positions use zero-based physical terminal coordinates. No second input reader
++is created. Synchronous `poll` bounds its requested wait by the query deadline;
++`TerminalEvents` adds a deadline task so an unsupported terminal still completes
++without keyboard activity.
++
++`cancelCursorPositionQuery(id:)` cancels only a matching query and returns whether
++it did so. Its completion is queued for the next synchronous poll, or delivered
++to an active `TerminalEvents` source. Close cancels pending query state; an active
++event source receives that completion, while synchronous callers should cancel
++and poll before closing if they need the cancellation result. As before, closed
++sessions reject polling. A query output failure throws and leaves no pending ID;
++do not assume a failed output wrote zero bytes.
++
++The decoder accepts only a positive decimal `row;column` CPR ending in CSI R.
++Fragmentation is supported. Unsolicited and malformed reports never become text
++or F3 keystrokes. SS3 F3 and extended tilde F3 remain keyboard events. Coordinates
++are advisory: DSR responses have no request token, so a late reply cannot be
++correlated against a later query. Avoid using a cursor result as authorization or
++as proof that output completed. Application code owns anchor acceptance, resize
++handling, and viewport policy.
++
++Run the ordinary format, test, and demo checks, then:
++
++```sh
++python3 scripts/smoke-cursor.py .build/debug/weft-demo
++```
++
++That fixture supplies fragmented CPR through a PTY, interleaves input and resize,
++and checks timeout with no input plus terminal-mode restoration. It proves the
++single-reader transport behavior, not an emulator's cursor reporting accuracy.
+diff --git a/Examples/Demo/Demo.swift b/Examples/Demo/Demo.swift
+index 93ad60d..c7e4a97 100644
+--- a/Examples/Demo/Demo.swift
++++ b/Examples/Demo/Demo.swift
+@@ -12,6 +12,10 @@ struct Demo {
+         var output = ANSIBackend()
+         try output.write(Data("weft / the terminal, untangled.\r\nPress keys. Escape or Ctrl-C exits.\r\n".utf8))
+ 
++        if CommandLine.arguments.contains("--cursor-query") {
++            _ = try session.requestCursorPosition(timeoutMilliseconds: 500)
++        }
++
+         for try await batch in input.events {
+             for event in batch {
+                 if let key = event.keyboardEvent?.key, [.escape, .interrupt, .endOfInput].contains(key) {
+diff --git a/Sources/weft/CursorPositionQueryResult.swift b/Sources/weft/CursorPositionQueryResult.swift
+new file mode 100644
+index 0000000..145821b
+--- /dev/null
++++ b/Sources/weft/CursorPositionQueryResult.swift
+@@ -0,0 +1,19 @@
++import Foundation
++
++/// The completion of an application-requested terminal cursor query.
++public struct CursorPositionQueryResult: Equatable, Sendable {
++    /// Cursor coordinates are zero-based physical terminal cells.
++    public enum Outcome: Equatable, Sendable {
++        case position(Point)
++        case timedOut
++        case cancelled
++    }
++
++    public let id: UUID
++    public let outcome: Outcome
++
++    public init(id: UUID, outcome: Outcome) {
++        self.id = id
++        self.outcome = outcome
++    }
++}
+diff --git a/Sources/weft/InputDecoder.swift b/Sources/weft/InputDecoder.swift
+index 962accc..9336592 100644
+--- a/Sources/weft/InputDecoder.swift
++++ b/Sources/weft/InputDecoder.swift
+@@ -6,6 +6,12 @@ import Foundation
+ /// multiple calls to `feed(_:)`.
+ public struct InputDecoder {
+     private var pendingBytes: [UInt8] = []
++    private var cursorPositionReports: [Point] = []
++
++    internal mutating func takeCursorPositionReports() -> [Point] {
++        defer { cursorPositionReports.removeAll(keepingCapacity: true) }
++        return cursorPositionReports
++    }
+     private var pasteBytes: [UInt8]?
+     private let pasteLimit = 1_048_576
+     private var controlString: DiscardedControlString?
+@@ -105,6 +111,17 @@ public struct InputDecoder {
+                         pasteBytes = []
+                         continue
+                     }
++                    if code.last == "R" {
++                        let values = code.dropLast().split(separator: ";", omittingEmptySubsequences: false)
++                        if values.count == 2,
++                            values.allSatisfy({ !$0.isEmpty && $0.utf8.allSatisfy { (48...57).contains($0) } }),
++                            let row = Int(values[0]), let column = Int(values[1]), row > 0, column > 0
++                        {
++                            // Keep storage bounded when a decoder is used without a session.
++                            cursorPositionReports = [Point(x: column - 1, y: row - 1)]
++                        }
++                        continue
++                    }
+                     if let event = decodeControlSequence(code) {
+                         events.append(event)
+                     }
+diff --git a/Sources/weft/InputEvent.swift b/Sources/weft/InputEvent.swift
+index c37c136..61b1b04 100644
+--- a/Sources/weft/InputEvent.swift
++++ b/Sources/weft/InputEvent.swift
+@@ -7,6 +7,7 @@ public enum InputEvent: Equatable, Sendable {
+     case mouse(MouseEvent)
+     case resize(Int, Int)
+     case signal(Int)
++    case cursorPositionQuery(CursorPositionQueryResult)
+ }
+ 
+ public extension InputEvent {
+diff --git a/Sources/weft/TerminalError.swift b/Sources/weft/TerminalError.swift
+index 643af34..594ae82 100644
+--- a/Sources/weft/TerminalError.swift
++++ b/Sources/weft/TerminalError.swift
+@@ -7,4 +7,5 @@ public enum TerminalError: Error, Equatable {
+     case configurationFailed(operation: String, code: Int32)
+     case inputClosed
+     case outputFailed
++    case cursorPositionQueryAlreadyPending
+ }
+diff --git a/Sources/weft/TerminalEvents.swift b/Sources/weft/TerminalEvents.swift
+index e9c06e6..7b77c0b 100644
+--- a/Sources/weft/TerminalEvents.swift
++++ b/Sources/weft/TerminalEvents.swift
+@@ -19,6 +19,7 @@ public final class TerminalEvents {
+     private let continuation: AsyncThrowingStream<[InputEvent], Error>.Continuation
+     private var sources: TerminalEventSources?
+     private var escapeTimeout: Task<Void, Never>?
++    private var queryTimeout: Task<Void, Never>?
+     private var stopped = false
+ 
+     public init(session: TerminalSession) {
+@@ -38,11 +39,15 @@ public final class TerminalEvents {
+         continuation.onTermination = { [weak self] _ in
+             Task { @MainActor in self?.stop() }
+         }
++        session.queryStateChanged = { [weak self] in
++            MainActor.assumeIsolated { self?.queryStateChanged() }
++        }
+         receiveAvailableEvents()
+     }
+ 
+     deinit {
+         escapeTimeout?.cancel()
++        queryTimeout?.cancel()
+         continuation.finish()
+     }
+ 
+@@ -56,9 +61,28 @@ public final class TerminalEvents {
+         sources = nil
+         escapeTimeout?.cancel()
+         escapeTimeout = nil
++        queryTimeout?.cancel()
++        queryTimeout = nil
++        session.queryStateChanged = nil
+         continuation.finish()
+     }
+ 
++    private func queryStateChanged() {
++        guard !stopped else { return }
++        let completions = session.takeQueryEvents()
++        if !completions.isEmpty { continuation.yield(completions) }
++        queryTimeout?.cancel()
++        queryTimeout = nil
++        if let delay = session.cursorQueryDelay {
++            queryTimeout = Task { [weak self] in
++                do {
++                    try await Task.sleep(for: .seconds(delay))
++                } catch { return }
++                self?.receiveAvailableEvents()
++            }
++        }
++    }
++
+     private func receiveSignal(_ number: Int32) {
+         guard !stopped else { return }
+         if number == SIGWINCH {
+@@ -75,6 +99,7 @@ public final class TerminalEvents {
+         do {
+             let batch = try session.poll(timeoutMilliseconds: 0)
+             if !batch.isEmpty { continuation.yield(batch) }
++            queryStateChanged()
+             escapeTimeout?.cancel()
+             escapeTimeout = nil
+             if session.hasPendingEscape {
+diff --git a/Sources/weft/TerminalSession.swift b/Sources/weft/TerminalSession.swift
+index 2ef17df..6394073 100644
+--- a/Sources/weft/TerminalSession.swift
++++ b/Sources/weft/TerminalSession.swift
+@@ -17,7 +17,15 @@ public final class TerminalSession {
+     private var active = false
+     private var decoder = InputDecoder()
+     private var lastSize: Rect
+-    private var lastInputTime = ProcessInfo.processInfo.systemUptime
++    private var lastInputTime: TimeInterval
++    private let clock: () -> TimeInterval
++    private var cursorQuery: (id: UUID, deadline: TimeInterval)?
++    private var queryEvents: [InputEvent] = []
++    internal var queryStateChanged: (() -> Void)?
++
++    internal var cursorQueryDelay: TimeInterval? {
++        cursorQuery.map { max(0, $0.deadline - clock()) }
++    }
+ 
+     /// Opens raw input without changing screens or clearing history by default.
+     ///
+@@ -27,9 +35,14 @@ public final class TerminalSession {
+         try self.init(options: options, driver: SystemTerminalSessionDriver())
+     }
+ 
+-    internal init(options: TerminalOptions, driver: any TerminalSessionDriver) throws {
++    internal init(
++        options: TerminalOptions, driver: any TerminalSessionDriver,
++        clock: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
++    ) throws {
+         self.options = options
+         self.driver = driver
++        self.clock = clock
++        lastInputTime = clock()
+         mouseEnabled = options.mouseCapture
+         lastSize = driver.size
+         try driver.begin(rawMode: options.rawMode)
+@@ -64,6 +77,7 @@ public final class TerminalSession {
+     /// irreversible. Forced termination such as SIGKILL cannot perform cleanup.
+     public func close() {
+         guard active else { return }
++        if let query = cursorQuery { _ = cancelCursorPositionQuery(id: query.id) }
+         active = false
+         try? driver.write(
+             Data(options.leaveSequence(mouseEnabled: mouseEnabled, reportMotion: mouseMotionEnabled).utf8))
+@@ -109,6 +123,36 @@ public final class TerminalSession {
+         try driver.write(Data("\u{1b}]52;c;\(encodedText)\u{7}".utf8))
+     }
+ 
++    /// Sends one bounded cursor-position query through the session's existing reader.
++    ///
++    /// Consume its completion through `poll` or `TerminalEvents`. Timeout is clamped
++    /// to 1...60,000 ms. Reports carry no protocol token: late replies cannot be
++    /// distinguished from replies to a later query. Treat positions as advisory.
++    public func requestCursorPosition(timeoutMilliseconds: Int = 1000) throws -> UUID {
++        guard active else { throw TerminalError.sessionClosed }
++        guard cursorQuery == nil else { throw TerminalError.cursorPositionQueryAlreadyPending }
++        let id = UUID()
++        try driver.write(Data("\u{1b}[6n".utf8))
++        cursorQuery = (id, clock() + Double(min(60_000, max(1, timeoutMilliseconds))) / 1000)
++        queryStateChanged?()
++        return id
++    }
++
++    /// Cancels a matching pending query and delivers exactly one cancellation completion.
++    @discardableResult
++    public func cancelCursorPositionQuery(id: UUID) -> Bool {
++        guard cursorQuery?.id == id else { return false }
++        cursorQuery = nil
++        queryEvents.append(.cursorPositionQuery(CursorPositionQueryResult(id: id, outcome: .cancelled)))
++        queryStateChanged?()
++        return true
++    }
++
++    internal func takeQueryEvents() -> [InputEvent] {
++        defer { queryEvents.removeAll(keepingCapacity: true) }
++        return queryEvents
++    }
++
+     /// Waits for input and reports terminal resize and termination signals.
+     ///
+     /// Zero polls without blocking; -1 waits indefinitely. Call again after 35 ms
+@@ -124,7 +168,12 @@ public final class TerminalSession {
+         // Check size after draining notifications. A resize already waiting must
+         // be returned now rather than consumed before an indefinite input wait.
+         let resizedBeforeRead = driver.size != lastSize
+-        let timeout = resizedBeforeRead ? 0 : Int32(clamping: max(-1, timeoutMilliseconds))
++        var boundedTimeout = max(-1, timeoutMilliseconds)
++        if let delay = cursorQueryDelay {
++            let deadlineTimeout = Int((delay * 1000).rounded(.up))
++            boundedTimeout = boundedTimeout < 0 ? deadlineTimeout : min(boundedTimeout, deadlineTimeout)
++        }
++        let timeout = resizedBeforeRead || !queryEvents.isEmpty ? 0 : Int32(clamping: boundedTimeout)
+         let count = driver.read(&bytes, timeoutMilliseconds: timeout)
+         if driver.signalNumber != 0 {
+             return [.signal(Int(driver.signalNumber))]
+@@ -132,7 +181,7 @@ public final class TerminalSession {
+         guard count >= 0 else { throw TerminalError.inputClosed }
+ 
+         var events: [InputEvent] = []
+-        let now = ProcessInfo.processInfo.systemUptime
++        let now = clock()
+         if count > 0 {
+             events = decoder.feed(Array(bytes.prefix(count)))
+             lastInputTime = now
+@@ -140,6 +189,22 @@ public final class TerminalSession {
+             events += decoder.flushEscape()
+         }
+ 
++        let reports = decoder.takeCursorPositionReports()
++        if let query = cursorQuery {
++            let outcome: CursorPositionQueryResult.Outcome?
++            if now >= query.deadline {
++                outcome = .timedOut
++            } else if let position = reports.first {
++                outcome = .position(position)
++            } else {
++                outcome = nil
++            }
++            if let outcome {
++                cursorQuery = nil
++                queryEvents.append(.cursorPositionQuery(CursorPositionQueryResult(id: query.id, outcome: outcome)))
++            }
++        }
++        events += takeQueryEvents()
+         let size = driver.size
+         if size != lastSize {
+             lastSize = size
+diff --git a/Tests/weftTests/TerminalSessionTests.swift b/Tests/weftTests/TerminalSessionTests.swift
+index 4eab503..664161e 100644
+--- a/Tests/weftTests/TerminalSessionTests.swift
++++ b/Tests/weftTests/TerminalSessionTests.swift
+@@ -192,3 +192,79 @@ private final class SessionDriver: TerminalSessionDriver {
+     #expect(session.mouseEnabled && session.mouseMotionEnabled)
+     #expect(driver.writes.last?.contains("\u{1b}[?1003h") == true)
+ }
++
++@Test func cursorQueryCompletesAcrossFragmentsWithoutConsumingKeysOrResize() throws {
++    let driver = SessionDriver()
++    let session = try TerminalSession(options: TerminalOptions(), driver: driver)
++    defer { session.close() }
++    let id = try session.requestCursorPosition()
++    #expect(driver.writes.last == "\u{1b}[6n")
++    driver.pendingBytes = Array("x\u{1b}[12;".utf8)
++    #expect(try session.poll(timeoutMilliseconds: 0) == [.text("x")])
++    driver.size = Rect(width: 90, height: 30)
++    driver.pendingBytes = Array("34Ry\u{1b}OR\u{1b}[13;2:3~".utf8)
++    let events = try session.poll(timeoutMilliseconds: 0)
++    #expect(events.first == .text("y"))
++    #expect(events.contains(.key(.function(3))))
++    #expect(events.contains(.keyEvent(KeyEvent(key: .function(3), modifiers: .shift, kind: .release))))
++    #expect(
++        events.contains(
++            .cursorPositionQuery(CursorPositionQueryResult(id: id, outcome: .position(Point(x: 33, y: 11))))))
++    #expect(events.last == .resize(90, 30))
++    #expect(session.cursorQueryDelay == nil)
++}
++
++@Test func cursorQueryBoundsWaitAndTimesOutUsingMonotonicClock() throws {
++    let driver = SessionDriver()
++    var now = 10.0
++    let session = try TerminalSession(options: TerminalOptions(), driver: driver, clock: { now })
++    defer { session.close() }
++    let id = try session.requestCursorPosition(timeoutMilliseconds: 250)
++    #expect(throws: TerminalError.cursorPositionQueryAlreadyPending) { try session.requestCursorPosition() }
++    #expect(try session.poll(timeoutMilliseconds: -1).isEmpty)
++    #expect(driver.lastTimeout == 250)
++    now = 10.25
++    #expect(
++        try session.poll(timeoutMilliseconds: -1) == [
++            .cursorPositionQuery(CursorPositionQueryResult(id: id, outcome: .timedOut))
++        ])
++    #expect(driver.lastTimeout == 0)
++    driver.pendingBytes = Array("\u{1b}[3;4Rz".utf8)
++    #expect(try session.poll(timeoutMilliseconds: 0) == [.text("z")])
++}
++
++@Test func failedCursorQueryWriteLeavesNoPendingRequestAndCancellationIsExactlyOnce() throws {
++    let driver = SessionDriver()
++    let session = try TerminalSession(options: TerminalOptions(), driver: driver)
++    driver.failedWrites = [2]
++    #expect(throws: TerminalError.outputFailed) { try session.requestCursorPosition() }
++    #expect(session.cursorQueryDelay == nil)
++    let id = try session.requestCursorPosition()
++    #expect(!session.cancelCursorPositionQuery(id: UUID()))
++    #expect(session.cancelCursorPositionQuery(id: id))
++    #expect(!session.cancelCursorPositionQuery(id: id))
++    #expect(
++        try session.poll(timeoutMilliseconds: 0) == [
++            .cursorPositionQuery(CursorPositionQueryResult(id: id, outcome: .cancelled))
++        ])
++    #expect(try session.poll(timeoutMilliseconds: 0).isEmpty)
++    let closingID = try session.requestCursorPosition()
++    session.close()
++    #expect(
++        session.takeQueryEvents() == [
++            .cursorPositionQuery(CursorPositionQueryResult(id: closingID, outcome: .cancelled))
++        ])
++    #expect(throws: TerminalError.sessionClosed) { try session.requestCursorPosition() }
++}
++
++@Test func cursorReportsAreStrictPositiveDecimalAndDoNotAliasFunctionKeys() throws {
++    let driver = SessionDriver()
++    let session = try TerminalSession(options: TerminalOptions(), driver: driver)
++    defer { session.close() }
++    driver.pendingBytes = Array("\u{1b}[1;2R".utf8)
++    #expect(try session.poll(timeoutMilliseconds: 0).isEmpty)
++    let id = try session.requestCursorPosition()
++    driver.pendingBytes = Array("\u{1b}[0;2R\u{1b}[1;-2R\u{1b}[1;2:3R\u{1b}[99999999999999999999999;2R\u{1b}[13~".utf8)
++    #expect(try session.poll(timeoutMilliseconds: 0) == [.key(.function(3))])
++    #expect(session.cancelCursorPositionQuery(id: id))
++}
+diff --git a/scripts/smoke-cursor.py b/scripts/smoke-cursor.py
+new file mode 100644
+index 0000000..6a029d2
+--- /dev/null
++++ b/scripts/smoke-cursor.py
+@@ -0,0 +1,64 @@
++#!/usr/bin/env python3
++"""Exercise cursor query through the real PTY single-reader async path.
++
++This supplies terminal replies; it does not verify a terminal emulator's CPR.
++"""
++import fcntl
++import os
++import pty
++import select
++import signal
++import struct
++import subprocess
++import sys
++import termios
++import time
++
++
++def exercise(reply):
++    master, slave = pty.openpty()
++    original = termios.tcgetattr(slave)
++    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 24, 80, 0, 0))
++    process = subprocess.Popen([sys.argv[1], '--cursor-query'], stdin=slave, stdout=slave, stderr=slave)
++    output = bytearray()
++
++    def read_until(token, timeout=10):
++        deadline = time.monotonic() + timeout
++        while token not in output and time.monotonic() < deadline:
++            ready, _, _ = select.select([master], [], [], 0.05)
++            if ready:
++                output.extend(os.read(master, 65536))
++            if process.poll() is not None:
++                break
++        assert token in output, (token, bytes(output[-3000:]))
++
++    try:
++        read_until(b'\x1b[6n')
++        if reply:
++            os.write(master, b'x\x1b[12;')
++            time.sleep(0.02)
++            fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 30, 100, 0, 0))
++            os.kill(process.pid, signal.SIGWINCH)
++            os.write(master, b'34Ry\x1b[13;2:3~')
++            read_until(b'x: 33, y: 11')
++            read_until(b'function(3)')
++            read_until(b'resize(100, 30)')
++        else:
++            # No input wakes the source: its query deadline task must fire.
++            read_until(b'timedOut')
++        os.write(master, b'\x1b')
++        read_until(b'\x1b[?1049l')
++        process.wait(timeout=10)
++        assert process.returncode == 0, bytes(output[-3000:])
++        assert termios.tcgetattr(slave) == original, 'terminal settings were not restored'
++    finally:
++        if process.poll() is None:
++            process.kill()
++            process.wait()
++        os.close(master)
++        os.close(slave)
++
++
++exercise(True)
++exercise(False)
++print('Cursor PTY smoke passed: fragments, keys, resize, idle timeout, mode restoration')
+-- 
+2.54.0 (Apple Git-157)
+

@@ -25,6 +25,7 @@ public struct TextDocument: Sendable {
         var spans: [TextSpan]
         var background: Color
         let wrapping: TextWrapping
+        var wrapOptions = TextWrapOptions()
         var verticalPadding = 0
         var collapsedSummary: [TextSpan]?
         var widthLimit: Int?
@@ -52,20 +53,23 @@ public struct TextDocument: Sendable {
 
     /// Appends an entry, separated from its predecessor by one blank row.
     @discardableResult
-    public mutating func append(_ text: String, wrapping: TextWrapping = .grapheme) -> TextDocumentEntryID {
-        append([TextSpan(text)], wrapping: wrapping)
+    public mutating func append(
+        _ text: String, wrapping: TextWrapping = .grapheme, options: TextWrapOptions = TextWrapOptions()
+    ) -> TextDocumentEntryID {
+        append([TextSpan(text)], wrapping: wrapping, options: options)
     }
 
     /// Appends styled text and returns a stable identity for later updates.
     @discardableResult
     public mutating func append(
         _ spans: [TextSpan], background: Color = .terminalDefault,
-        wrapping: TextWrapping = .grapheme, verticalPadding: Int = 0
+        wrapping: TextWrapping = .grapheme, verticalPadding: Int = 0, options: TextWrapOptions = TextWrapOptions()
     ) -> TextDocumentEntryID {
         let id = TextDocumentEntryID(rawValue: nextID)
         nextID += 1
         let entry = Entry(
-            id: id, spans: spans, background: background, wrapping: wrapping, verticalPadding: max(0, verticalPadding))
+            id: id, spans: spans, background: background, wrapping: wrapping, wrapOptions: options,
+            verticalPadding: max(0, verticalPadding))
         starts.append(0)
         entries.append(entry)
         layouts.append(makeLayout(entry))
@@ -78,12 +82,12 @@ public struct TextDocument: Sendable {
     @discardableResult
     public mutating func insert(
         _ spans: [TextSpan], before target: TextDocumentEntryID, background: Color = .terminalDefault,
-        wrapping: TextWrapping = .grapheme
+        wrapping: TextWrapping = .grapheme, options: TextWrapOptions = TextWrapOptions()
     ) -> TextDocumentEntryID? {
         guard let index = entries.firstIndex(where: { $0.id == target }) else { return nil }
         let id = TextDocumentEntryID(rawValue: nextID)
         nextID += 1
-        let entry = Entry(id: id, spans: spans, background: background, wrapping: wrapping)
+        let entry = Entry(id: id, spans: spans, background: background, wrapping: wrapping, wrapOptions: options)
         entries.insert(entry, at: index)
         layouts.insert(makeLayout(entry), at: index)
         starts.insert(0, at: index)
@@ -177,7 +181,7 @@ public struct TextDocument: Sendable {
         _ prefix: TextSpan, continuation: String, for id: TextDocumentEntryID
     ) {
         guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
-        entries[index].displayPrefix = TextSpan(prefix.text, style: prefix.style, copyable: false)
+        entries[index].displayPrefix = TextSpan(prefix.text, style: prefix.style, copyable: false, patch: prefix.patch)
         entries[index].continuationPrefix = continuation
         layouts[index] = makeLayout(entries[index])
         layoutBuildCount += 1
@@ -416,24 +420,36 @@ public struct TextDocument: Sendable {
     private func restyled(_ span: TextSpan, using transform: (Style) -> Style) -> TextSpan {
         TextSpan(
             span.text, style: span.style.map(transform), link: span.link,
-            codeBlock: span.codeBlock, isCodeBlockHeader: span.isCodeBlockHeader, copyable: span.copyable)
+            codeBlock: span.codeBlock, isCodeBlockHeader: span.isCodeBlockHeader, copyable: span.copyable,
+            sourceLine: span.sourceLine, patch: span.patch)
     }
 
     private func fullLayout(_ entry: Entry) -> TextLayout {
         let available = max(1, width - entry.trailingReservedColumns)
         let width = min(available, entry.widthLimit ?? available)
         let spans = presentationSpans(entry.collapsedSummary ?? entry.spans, for: entry)
+        let continuation = entry.displayPrefix.map {
+            TextSpan(entry.continuationPrefix, style: $0.style, copyable: false, patch: $0.patch)
+        }
         guard entry.background != .terminalDefault else {
-            return TextLayout(spans, width: width, wrapping: entry.wrapping).paddedVertically(entry.verticalPadding)
+            return TextLayout(
+                spans, width: width, wrapping: entry.wrapping, continuationPrefix: continuation,
+                options: entry.wrapOptions
+            )
+            .paddedVertically(entry.verticalPadding)
         }
         let filled = spans.map { span in
             var style = span.style ?? Style()
             if style.background == .terminalDefault { style.background = entry.background }
             return TextSpan(
                 span.text, style: style, link: span.link,
-                codeBlock: span.codeBlock, isCodeBlockHeader: span.isCodeBlockHeader, copyable: span.copyable)
+                codeBlock: span.codeBlock, isCodeBlockHeader: span.isCodeBlockHeader, copyable: span.copyable,
+                sourceLine: span.sourceLine, patch: span.patch)
         }
-        return TextLayout(filled, width: width, wrapping: entry.wrapping).paddedVertically(entry.verticalPadding)
+        return TextLayout(
+            filled, width: width, wrapping: entry.wrapping, continuationPrefix: continuation, options: entry.wrapOptions
+        )
+        .paddedVertically(entry.verticalPadding)
     }
 
     private func presentationSpans(_ spans: [TextSpan], for entry: Entry) -> [TextSpan] {
@@ -443,14 +459,16 @@ public struct TextDocument: Sendable {
             let parts = span.text.components(separatedBy: "\n")
             for (index, part) in parts.enumerated() {
                 if index > 0 {
-                    result.append(TextSpan("\n", style: span.style, copyable: span.copyable))
-                    result.append(TextSpan(entry.continuationPrefix, style: prefix.style, copyable: false))
+                    result.append(TextSpan("\n", style: span.style, copyable: span.copyable, patch: span.patch))
+                    result.append(
+                        TextSpan(entry.continuationPrefix, style: prefix.style, copyable: false, patch: prefix.patch))
                 }
                 if !part.isEmpty {
                     result.append(
                         TextSpan(
                             part, style: span.style, link: span.link, codeBlock: span.codeBlock,
-                            isCodeBlockHeader: span.isCodeBlockHeader, copyable: span.copyable))
+                            isCodeBlockHeader: span.isCodeBlockHeader, copyable: span.copyable,
+                            sourceLine: span.sourceLine, patch: span.patch))
                 }
             }
         }

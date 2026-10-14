@@ -154,7 +154,7 @@ public struct WindowFrame: Widget {
             updateInteraction(at: mouse.position)
             interaction = nil
             return true
-        case .move, .wheelUp, .wheelDown:
+        default:
             return false
         }
     }

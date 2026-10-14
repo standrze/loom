@@ -4,6 +4,24 @@ import weft
 public enum TextWrapping: Equatable, Sendable {
     case grapheme
     case word
+    /// Only explicit newlines start rows; paint a viewport over the full lines.
+    case none
+}
+
+/// Optional wrapping controls.
+///
+/// Defaults preserve existing layout and literal source copying.
+public struct TextWrapOptions: Equatable, Sendable {
+    public var trimLeadingWhitespace: Bool
+    public var breakLongWords: Bool
+    /// Number of cells emitted for each tab, independent of its column.
+    public var tabWidth: Int
+
+    public init(trimLeadingWhitespace: Bool = false, breakLongWords: Bool = true, tabWidth: Int = 4) {
+        self.trimLeadingWhitespace = trimLeadingWhitespace
+        self.breakLongWords = breakLongWords
+        self.tabWidth = max(1, tabWidth)
+    }
 }
 
 /// The single source of geometry for painting, hit testing, highlighting, and copying.
@@ -16,8 +34,24 @@ public struct TextLayout: Sendable {
         public let width: Int
         public let sourceRange: Range<String.Index>
         public let style: Style?
+        /// Changes resolved over the explicit glyph style or the inherited paint style.
+        public let patch: StylePatch?
         public let link: String?
         public let copyable: Bool
+
+        init(
+            text: String, column: Int, width: Int, sourceRange: Range<String.Index>,
+            style: Style?, patch: StylePatch? = nil, link: String?, copyable: Bool
+        ) {
+            self.text = text
+            self.column = column
+            self.width = width
+            self.sourceRange = sourceRange
+            self.style = style
+            self.patch = patch
+            self.link = link
+            self.copyable = copyable
+        }
     }
     public struct Line: Sendable {
         public var glyphs: [Glyph] = []
@@ -82,7 +116,8 @@ public struct TextLayout: Sendable {
         last.glyphs.append(
             Glyph(
                 text: "…", column: ellipsisColumn, width: 1,
-                sourceRange: source.endIndex..<source.endIndex, style: last.glyphs.last?.style, link: nil,
+                sourceRange: source.endIndex..<source.endIndex, style: last.glyphs.last?.style,
+                patch: last.glyphs.last?.patch, link: nil,
                 copyable: false))
         visible.append(last)
         visible.append(contentsOf: lines.suffix(padding))
@@ -99,18 +134,20 @@ public struct TextLayout: Sendable {
     }
 
     public init(
-        _ text: String, width: Int, wrapping: TextWrapping = .grapheme,
+        _ text: String, width: Int, wrapping: TextWrapping = .grapheme, options: TextWrapOptions = TextWrapOptions(),
         measure: (Character) -> Int = terminalCellWidth
     ) {
-        self.init([TextSpan(text)], width: width, wrapping: wrapping, measure: measure)
+        self.init([TextSpan(text)], width: width, wrapping: wrapping, options: options, measure: measure)
     }
 
     /// Lays out styled spans as one source string.
     ///
-    /// A grapheme crossing a span boundary uses the style of its first scalar,
-    /// keeping selection intact.
+    /// A grapheme crossing a span boundary uses the style and patch of its first scalar,
+    /// keeping selection intact. An explicit continuation prefix overrides repeated
+    /// display-only leading glyphs on soft wraps, without entering copied text.
     public init(
         _ spans: [TextSpan], width: Int, wrapping: TextWrapping = .grapheme,
+        continuationPrefix: TextSpan? = nil, options: TextWrapOptions = TextWrapOptions(),
         measure: (Character) -> Int = terminalCellWidth
     ) {
         // Keep literal newlines and tabs for copying, remove terminal-control characters.
@@ -122,8 +159,12 @@ public struct TextLayout: Sendable {
         }
         let sanitizedSource = pieces.joined()
         source = sanitizedSource
-        let layoutWidth = max(1, width)
-        self.width = layoutWidth
+        // A logical unwrapped line is limited by its input size, not the viewport.
+        // Four cells per Character cover tab expansion without giant allocations.
+        let capacity = sanitizedSource.count.multipliedReportingOverflow(by: max(2, options.tabWidth))
+        let unwrappedWidth = capacity.overflow ? Int.max : max(2, capacity.partialValue)
+        let layoutWidth = wrapping == .none ? unwrappedWidth : max(1, width)
+        self.width = max(1, width)
         var nonCopyableRanges: [Range<String.Index>] = []
         var styleEnds: [(byteOffset: Int, span: TextSpan)] = []
         var endByteOffset = 0
@@ -147,19 +188,28 @@ public struct TextLayout: Sendable {
         var quotePrefixWidth = 0
         var readingPrefix = true
         var hasCopyableContent = false
+        var softWrapped = false
+        var longWord = false
+
+        let explicitPrefix = continuationPrefix.map {
+            TextLayout([$0], width: layoutWidth, measure: measure).lines.first?.glyphs ?? []
+        }
 
         func beginWrappedLine() {
-            let repeatsPrefix = !readingPrefix && quotePrefixWidth + 2 <= layoutWidth
+            softWrapped = true
+            let prefix = explicitPrefix ?? quotePrefix
+            let prefixWidth = explicitPrefix.map { $0.reduce(0) { $0 + $1.width } } ?? quotePrefixWidth
+            let repeatsPrefix = !readingPrefix && prefixWidth + 2 <= layoutWidth
             lines.append(Line())
             column = 0
             hasCopyableContent = false
             guard repeatsPrefix else { return }
-            for glyph in quotePrefix {
+            for glyph in prefix {
                 lines[lines.count - 1].glyphs.append(
                     Glyph(
                         text: glyph.text, column: column, width: glyph.width,
                         sourceRange: sanitizedSource.endIndex..<sanitizedSource.endIndex,
-                        style: glyph.style, link: nil, copyable: false))
+                        style: glyph.style, patch: glyph.patch, link: nil, copyable: false))
                 column += glyph.width
             }
         }
@@ -179,19 +229,32 @@ public struct TextLayout: Sendable {
                 lines.append(Line())
                 column = 0
                 startsWord = true
+                softWrapped = false
+                longWord = false
                 quotePrefix = []
                 quotePrefixWidth = 0
                 readingPrefix = true
                 hasCopyableContent = false
                 continue
             }
+            // Trim before creating a soft-wrap row, so trailing whitespace cannot add an empty row.
+            if options.trimLeadingWhitespace && character.isWhitespace
+                && ((softWrapped && !hasCopyableContent) || column >= layoutWidth)
+            {
+                startsWord = true
+                longWord = false
+                continue
+            }
             if character == "\t" {
-                for _ in 0..<4 {
+                for _ in 0..<max(1, options.tabWidth) {
+                    if options.trimLeadingWhitespace && column >= layoutWidth { continue }
                     if column == layoutWidth { beginWrappedLine() }
+                    if options.trimLeadingWhitespace && softWrapped && !hasCopyableContent { continue }
                     lines[lines.count - 1].recordCodeBlock(sourceSpan)
                     lines[lines.count - 1].glyphs.append(
                         Glyph(
-                            text: " ", column: column, width: 1, sourceRange: range, style: glyphStyle, link: glyphLink,
+                            text: " ", column: column, width: 1, sourceRange: range, style: glyphStyle,
+                            patch: sourceSpan?.patch, link: glyphLink,
                             copyable: sourceSpan?.copyable ?? true)
                     )
                     column += 1
@@ -203,7 +266,7 @@ public struct TextLayout: Sendable {
                 startsWord = true
                 continue
             }
-            if wrapping == .word && startsWord && !character.isWhitespace && hasCopyableContent {
+            if wrapping == .word && startsWord && !character.isWhitespace {
                 var wordWidth = 0
                 var wordIndex = index
                 while wordIndex < sanitizedSource.endIndex {
@@ -213,11 +276,26 @@ public struct TextLayout: Sendable {
                     if wordWidth > layoutWidth { break }
                     wordIndex = sanitizedSource.index(after: wordIndex)
                 }
-                if wordWidth <= layoutWidth && column + wordWidth > layoutWidth { beginWrappedLine() }
+                longWord = wordWidth > layoutWidth
+                if hasCopyableContent && column + wordWidth > layoutWidth
+                    && (wordWidth <= layoutWidth || !options.breakLongWords)
+                {
+                    beginWrappedLine()
+                }
             }
             let measured = min(2, max(0, measure(character)))
             let span = max(1, measured)
-            if column + span > layoutWidth && column > 0 { beginWrappedLine() }
+            if options.trimLeadingWhitespace && character.isWhitespace && column + span > layoutWidth {
+                continue
+            }
+            if column + span > layoutWidth && column > 0
+                && !(wrapping == .word && longWord && !options.breakLongWords && !character.isWhitespace)
+            {
+                beginWrappedLine()
+            }
+            if options.trimLeadingWhitespace && softWrapped && !hasCopyableContent && character.isWhitespace {
+                continue
+            }
             // A one-column viewport cannot display a two-column character. Use a visible replacement.
             let glyph = span > layoutWidth ? "�" : measured == 0 ? "◌" + String(character) : String(character)
             let actualWidth = min(span, layoutWidth)
@@ -225,6 +303,7 @@ public struct TextLayout: Sendable {
             lines[lines.count - 1].glyphs.append(
                 Glyph(
                     text: glyph, column: column, width: actualWidth, sourceRange: range, style: glyphStyle,
+                    patch: sourceSpan?.patch,
                     link: glyphLink, copyable: sourceSpan?.copyable ?? true))
             if readingPrefix {
                 if sourceSpan?.copyable == false {
@@ -232,7 +311,7 @@ public struct TextLayout: Sendable {
                         Glyph(
                             text: glyph, column: quotePrefixWidth, width: actualWidth,
                             sourceRange: sanitizedSource.endIndex..<sanitizedSource.endIndex,
-                            style: glyphStyle, link: nil, copyable: false))
+                            style: glyphStyle, patch: sourceSpan?.patch, link: nil, copyable: false))
                     quotePrefixWidth += actualWidth
                 } else {
                     readingPrefix = false
@@ -340,36 +419,100 @@ public struct TextLayout: Sendable {
         return TextSelection(anchor: first, head: last)
     }
 
+    /// The content-to-viewport shift for a row.
+    ///
+    /// Overwide lines stay start aligned.
+    public func horizontalOrigin(forRow row: Int, viewportWidth: Int, alignment: CellAlignment = .left) -> Int {
+        guard lines.indices.contains(row) else { return 0 }
+        let lineWidth = lines[row].glyphs.last.map { $0.column + $0.width } ?? 0
+        let available = max(0, viewportWidth - min(max(0, viewportWidth), lineWidth))
+        switch alignment {
+        case .left: return 0
+        case .center: return available / 2
+        case .right: return available
+        }
+    }
+
+    /// Converts an absolute viewport cell to the logical content coordinates used by selections.
+    ///
+    /// Blank alignment padding and cells without a copyable glyph return nil.
+    public func contentPoint(
+        at point: Point, in area: Rect, rowOffset: Int = 0, columnOffset: Int = 0,
+        alignment: CellAlignment = .left
+    ) -> Point? {
+        guard area.contains(point) else { return nil }
+        let row = rowOffset.addingReportingOverflow(point.y - area.y)
+        guard !row.overflow, lines.indices.contains(row.partialValue) else { return nil }
+        let origin = horizontalOrigin(forRow: row.partialValue, viewportWidth: area.width, alignment: alignment)
+        let offset = max(0, columnOffset)
+        let local = point.x - area.x - origin
+        let column = local.addingReportingOverflow(offset)
+        guard !column.overflow else { return nil }
+        let content = Point(x: column.partialValue, y: row.partialValue)
+        guard
+            let glyph = lines[content.y].glyphs.first(where: {
+                content.x >= $0.column && content.x < $0.column + $0.width && $0.copyable
+            })
+        else { return nil }
+        let visibleColumn = glyph.column - offset + origin
+        guard visibleColumn >= 0, visibleColumn + glyph.width <= area.width else { return nil }
+        return content
+    }
+
+    /// Converts logical content coordinates to absolute viewport coordinates.
+    public func viewportPoint(
+        for point: Point, in area: Rect, rowOffset: Int = 0, columnOffset: Int = 0,
+        alignment: CellAlignment = .left
+    ) -> Point? {
+        guard lines.indices.contains(point.y) else { return nil }
+        let origin = horizontalOrigin(forRow: point.y, viewportWidth: area.width, alignment: alignment)
+        let shifted = point.x.subtractingReportingOverflow(max(0, columnOffset))
+        guard !shifted.overflow else { return nil }
+        let x = shifted.partialValue.addingReportingOverflow(origin)
+        let y = point.y.subtractingReportingOverflow(rowOffset)
+        guard !x.overflow, !y.overflow, x.partialValue >= 0, x.partialValue < area.width,
+            y.partialValue >= 0, y.partialValue < area.height
+        else { return nil }
+        if let glyph = lines[point.y].glyphs.first(where: { point.x >= $0.column && point.x < $0.column + $0.width }) {
+            let leading = glyph.column - max(0, columnOffset) + origin
+            guard leading >= 0, leading + glyph.width <= area.width else { return nil }
+        }
+        return Point(x: area.x + x.partialValue, y: area.y + y.partialValue)
+    }
+
     public func paint(
         in area: Rect, rowOffset: Int = 0, selection: TextSelection? = nil,
-        style: Style = Style(), buffer: inout Buffer
+        style: Style = Style(), columnOffset: Int = 0, alignment: CellAlignment = .left,
+        buffer: inout Buffer
     ) {
-        guard area.width > 0, area.height > 0 else {
-            return
-        }
-        for screenRow in 0..<area.height {
-            let row = rowOffset + screenRow
-            guard lines.indices.contains(row) else {
-                continue
-            }
-            if lines[row].codeBlock != nil, let codeStyle = lines[row].codeBlockStyle,
-                codeStyle.background != .terminalDefault
-            {
-                for column in 0..<area.width {
-                    buffer.put(
-                        " ", width: 1, at: Point(x: area.x + column, y: area.y + screenRow), style: codeStyle)
-                }
-            }
-            for glyph in lines[row].glyphs {
-                guard glyph.column + glyph.width <= area.width else {
-                    continue
-                }
-                let point = Point(x: area.x + glyph.column, y: area.y + screenRow)
-                buffer.put(glyph.text, width: glyph.width, at: point, style: glyph.style ?? style, link: glyph.link)
-                if let selection, glyph.copyable,
-                    selection.intersects(x: glyph.column, y: row, width: glyph.width)
+        guard area.width > 0, area.height > 0 else { return }
+        let horizontal = max(0, columnOffset)
+        buffer.withClip(area) { buffer in
+            for screenRow in 0..<area.height {
+                let sum = rowOffset.addingReportingOverflow(screenRow)
+                guard !sum.overflow, lines.indices.contains(sum.partialValue) else { continue }
+                let row = sum.partialValue
+                let origin = horizontalOrigin(forRow: row, viewportWidth: area.width, alignment: alignment)
+                if lines[row].codeBlock != nil, let codeStyle = lines[row].codeBlockStyle,
+                    codeStyle.background != .terminalDefault
                 {
-                    buffer.highlight(at: point)
+                    for column in 0..<area.width {
+                        buffer.put(
+                            " ", width: 1, at: Point(x: area.x + column, y: area.y + screenRow), style: codeStyle)
+                    }
+                }
+                for glyph in lines[row].glyphs {
+                    let column = glyph.column - horizontal + origin
+                    guard column >= 0, column <= area.width - glyph.width else { continue }
+                    let point = Point(x: area.x + column, y: area.y + screenRow)
+                    buffer.put(
+                        glyph.text, width: glyph.width, at: point,
+                        style: (glyph.style ?? style).applying(glyph.patch ?? StylePatch()), link: glyph.link)
+                    if let selection, glyph.copyable,
+                        selection.intersects(x: glyph.column, y: row, width: glyph.width)
+                    {
+                        buffer.highlight(at: point)
+                    }
                 }
             }
         }

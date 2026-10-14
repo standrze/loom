@@ -175,3 +175,71 @@ The browser PTY smoke exercises actual input decoding, search, focus traversal,
 selection, sorting, multiselect, modal focus restoration, mouse scrolling, resize,
 and terminal mode restoration. It is a macOS host check, not Linux or a terminal
 emulator compatibility certification.
+
+## Optional collection presentation
+
+Selection prefixes are opt-in. Set `selectionSymbol` and `prefixReservation` on
+List or Table. `.never` (the default) consumes no cells and hides the prefix;
+`.whenSelected` reserves space while a row is selected; `.always` reserves space
+regardless of selection. The symbol defaults to an empty string. Width uses
+terminal cells, including wide graphemes. The gutter is fixed while table columns
+scroll; header/footer/body columns share the remaining width. Table cell hits
+exclude the gutter; list hits in the gutter select the corresponding item.
+Custom list renderers receive the content rectangle after the gutter.
+
+```swift
+var list = List([ListItem(id: "job", "Compile", alignment: .right)])
+list.selectionSymbol = "> "
+list.prefixReservation = .always
+selection.revealPadding = 2
+```
+
+`ListItem.alignment` overrides the list alignment when non-nil. Explicit row heights
+still control wrapping and clipping. `SelectionState.revealPadding` defaults to
+zero and requests terminal rows around the selected item, clamped so that the
+item fits. It applies during navigation and data/viewport reconciliation, without
+undoing a manual wheel scroll on an unchanged draw.
+
+`TableState.highlightColumn(_:)` controls `highlightedColumn` independently of
+`selectedColumn`, which retains its existing selected-cell meaning. Whole-column
+highlights include headers and footers. Customize `columnSelectionStyle` or
+`columnSelectionPatch`; presentation applies row, whole-column, then selected-cell
+overlays in that order. Column selections are positional and clamp after a column
+count change.
+
+Legacy Style overlays retain their color-inheritance and enabled-modifier merge.
+Optional `ListItem.patch` and `TableRow.patch` apply after their explicit appearance;
+span patches apply after the legacy base/span merge. Selection patches apply last,
+so they can reset colors or disable inherited modifiers. List exposes
+`markedPatch`/`selectionPatch`; Table exposes `selectionPatch`,
+`columnSelectionPatch`, and `cellSelectionPatch`.
+
+Scrollbar accepts `thumbSymbol`, optional `trackSymbol`, `startSymbol`, and
+`endSymbol`. Every supplied symbol must be one grapheme occupying one safe terminal
+cell; invalid values use the direction's default symbol. Endpoints each consume a
+cell before thumb sizing, paging, and drag geometry. Endpoint clicks scroll one
+cell. For a one-cell bar the start endpoint takes precedence. `trackArea(in:)`
+returns only the draggable track; `thumbRange(length:)` expects that track length.
+
+Lists can opt into `reversed = true` to place their first item at the bottom. Up,
+down, Home, End, and page navigation follow screen order; identities remain in the
+original input order. Short reversed lists align to the bottom of the viewport.
+
+Set `automaticHeights = true` on a list or table to measure wrapped text using the
+final content width, including selection prefix reservation and table column sizing.
+Explicit heights remain the default. A custom list renderer supplies `measureRow`
+with a content width in terminal cells; without it the custom row keeps its explicit
+height. `TableRow.topMargin` and `bottomMargin` add background rows to scrolling but
+never produce cell hits.
+
+`TextWrapOptions` controls leading whitespace on soft wraps, long-word splitting,
+and cells per tab. Defaults preserve the existing four-cell tab expansion and
+wrapping behavior. Pass options to `TextLayout` or document append/insert operations.
+Trimming changes display geometry only: source text and copying retain whitespace.
+With word wrapping and `breakLongWords = false`, overwide words remain on one logical
+row and are clipped by the viewport.
+
+Collection `wrapping` and `wrapOptions` configure both automatic measurement and
+painting, so word wrapping, whitespace trimming, and custom tab widths use identical
+geometry. A reversed list initially reveals its first item at the viewport bottom;
+subsequent unchanged updates preserve manual scrolling.

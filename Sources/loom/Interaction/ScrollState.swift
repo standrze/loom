@@ -49,14 +49,15 @@ public struct ScrollState: Equatable, Sendable {
     }
 
     /// Reveals a cell range; a range larger than the viewport is aligned to its start.
-    public mutating func reveal(_ range: Range<Int>) {
+    public mutating func reveal(_ range: Range<Int>, padding: Int = 0) {
         guard !range.isEmpty, viewportLength > 0 else { return }
         let start = max(0, min(range.lowerBound, contentLength))
         let end = max(start, min(range.upperBound, contentLength))
-        if start < offset || end - start > viewportLength {
-            scroll(to: start)
-        } else if end > offset + viewportLength {
-            scroll(to: end - viewportLength)
+        let margin = min(max(0, padding), max(0, (viewportLength - (end - start)) / 2))
+        if start - margin < offset || end - start > viewportLength {
+            scroll(to: max(0, start - margin))
+        } else if end > offset + viewportLength - margin {
+            scroll(to: min(maximumOffset, end - viewportLength + margin))
         }
     }
 

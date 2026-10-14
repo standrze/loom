@@ -26,6 +26,13 @@ public enum Color: Equatable, Sendable {
     }
 }
 
+/// Terminal-managed blinking; emulator support varies.
+public enum Blink: Equatable, Sendable {
+    case none
+    case slow
+    case rapid
+}
+
 /// The visual attributes applied to a terminal cell.
 public struct Style: Equatable, Sendable {
     public var foreground: Color
@@ -34,10 +41,17 @@ public struct Style: Equatable, Sendable {
     public var italic: Bool
     public var underlined: Bool
     public var reversed: Bool
+    public var dim: Bool
+    public var strikethrough: Bool
+    public var underlineColor: Color
+    public var hidden: Bool
+    public var blink: Blink
 
     public init(
         foreground: Color = .terminalDefault, background: Color = .terminalDefault,
-        bold: Bool = false, italic: Bool = false, underlined: Bool = false, reversed: Bool = false
+        bold: Bool = false, italic: Bool = false, underlined: Bool = false, reversed: Bool = false,
+        dim: Bool = false, strikethrough: Bool = false,
+        underlineColor: Color = .terminalDefault, hidden: Bool = false, blink: Blink = .none
     ) {
         self.foreground = foreground
         self.background = background
@@ -45,5 +59,23 @@ public struct Style: Equatable, Sendable {
         self.italic = italic
         self.underlined = underlined
         self.reversed = reversed
+        self.dim = dim
+        self.strikethrough = strikethrough
+        self.underlineColor = underlineColor
+        self.hidden = hidden
+        self.blink = blink
+    }
+
+    /// Resolves a patch over this appearance.
+    ///
+    /// Unspecified attributes retain their current values.
+    public func applying(_ patch: StylePatch) -> Style {
+        Style(
+            foreground: patch.foreground ?? foreground, background: patch.background ?? background,
+            bold: patch.bold ?? bold, italic: patch.italic ?? italic,
+            underlined: patch.underlined ?? underlined, reversed: patch.reversed ?? reversed,
+            dim: patch.dim ?? dim, strikethrough: patch.strikethrough ?? strikethrough,
+            underlineColor: patch.underlineColor ?? underlineColor, hidden: patch.hidden ?? hidden,
+            blink: patch.blink ?? blink)
     }
 }

@@ -1,13 +1,42 @@
 import weft
 
 /// The axis along which a layout allocates regions.
-public enum Direction: Sendable {
+public enum Direction: Hashable, Sendable {
     case horizontal
     case vertical
 }
 
+/// How unused cells surround allocated layout regions.
+public enum Flex: Hashable, Sendable, CaseIterable {
+    case start
+    case end
+    case center
+    case spaceBetween
+    case spaceAround
+    case spaceEvenly
+}
+
+/// Nonnegative terminal-cell insets, clamped against the supplied area during layout.
+public struct LayoutInsets: Hashable, Sendable {
+    public var left: Int
+    public var right: Int
+    public var top: Int
+    public var bottom: Int
+
+    public init(left: Int = 0, right: Int = 0, top: Int = 0, bottom: Int = 0) {
+        self.left = left
+        self.right = right
+        self.top = top
+        self.bottom = bottom
+    }
+
+    public init(all cells: Int) {
+        self.init(left: cells, right: cells, top: cells, bottom: cells)
+    }
+}
+
 /// A fixed, relative, bounded, or weighted share of terminal cells.
-public enum Constraint: Sendable {
+public enum Constraint: Hashable, Sendable {
     /// A lower bound, with equal shares of excess space when there are no positive fills.
     case min(Int)
     /// An upper bound; grows toward the limit after minimum and requested sizes are satisfied.
@@ -22,28 +51,68 @@ public enum Constraint: Sendable {
     case fill(Int)
 }
 
-/// Splits an area into nonoverlapping regions in its original constraint order.
+/// Splits an area into regions in its original constraint order; explicit overlap is opt-in.
 ///
 /// Minimum bounds are reserved first, followed by length, percentage, and ratio requests.
 /// Equal-priority requests are clipped in source order when the area is too small.
 /// Maximum-bounded regions then share excess cells equally until their caps are reached.
 /// Weighted fills consume what remains, or minimum-bounded regions grow equally if no
 /// positive fill exists. Otherwise unused cells trail the last region.
-public struct Layout: Sendable {
+public struct Layout: Hashable, Sendable {
     public var direction: Direction
     public var constraints: [Constraint]
+    public var insets: LayoutInsets
+    public var spacing: Int
+    public var flex: Flex
+    public var overlap: Int = 0
 
-    public init(_ direction: Direction, _ constraints: [Constraint]) {
+    public init(
+        _ direction: Direction, _ constraints: [Constraint], insets: LayoutInsets = LayoutInsets(),
+        spacing: Int = 0, flex: Flex = .start
+    ) {
         self.direction = direction
         self.constraints = constraints
+        self.insets = insets
+        self.spacing = spacing
+        self.flex = flex
+    }
+
+    /// Explicitly chooses a gap or overlap in terminal cells.
+    ///
+    /// Negative amounts clamp to zero.
+    public init(
+        _ direction: Direction, _ constraints: [Constraint], insets: LayoutInsets = LayoutInsets(),
+        spacing: LayoutSpacing, flex: Flex = .start
+    ) {
+        self.init(direction, constraints, insets: insets, spacing: 0, flex: flex)
+        switch spacing {
+        case .gap(let cells): self.spacing = max(0, cells)
+        case .overlap(let cells): self.overlap = max(0, cells)
+        }
+    }
+
+    /// Uses only the caller-owned cache; ordinary split calls remain uncached.
+    public func split(_ area: Rect, cache: inout LayoutCache) -> [Rect] {
+        cache.split(self, area: area)
     }
 
     /// Returns a region for every constraint, including zero-sized regions.
     public func split(_ area: Rect) -> [Rect] {
         // Rect fields are mutable. Clamp both dimensions before doing coordinate arithmetic.
-        let width = representableLength(area.width, origin: area.x)
-        let height = representableLength(area.height, origin: area.y)
-        let total = direction == .vertical ? height : width
+        let originalWidth = representableLength(area.width, origin: area.x)
+        let originalHeight = representableLength(area.height, origin: area.y)
+        let left = min(originalWidth, max(0, insets.left))
+        let right = min(originalWidth - left, max(0, insets.right))
+        let top = min(originalHeight, max(0, insets.top))
+        let bottom = min(originalHeight - top, max(0, insets.bottom))
+        let width = originalWidth - left - right
+        let height = originalHeight - top - bottom
+        let origin = Point(x: area.x + left, y: area.y + top)
+        let axisLength = direction == .vertical ? height : width
+        let gaps = max(0, constraints.count - 1)
+        let gap = gaps == 0 ? 0 : min(max(0, spacing), axisLength / gaps)
+        // Fractions use the cells available for regions after insets and reserved gaps.
+        let total = axisLength - gap * gaps
         var remaining = total
         var lengths = Array(repeating: 0, count: constraints.count)
 
@@ -77,12 +146,53 @@ public struct Layout: Sendable {
             remainingWeight.subtract(UInt(weight))
         }
 
-        var offset = 0
-        return lengths.map { length in
-            defer { offset += length }
-            return direction == .vertical
-                ? Rect(x: area.x, y: area.y + offset, width: width, height: length)
-                : Rect(x: area.x + offset, y: area.y, width: length, height: height)
+        let overlaps = lengths.indices.dropLast().map { index in
+            min(max(0, overlap), min(lengths[index], lengths[index + 1]))
+        }
+        let freed = overlaps.reduce(0, +)
+        let spaces = distributedSpaces(remaining + freed, count: lengths.count)
+        var offset = spaces.first ?? 0
+        return lengths.enumerated().map { index, length in
+            let region =
+                direction == .vertical
+                ? Rect(x: origin.x, y: origin.y + offset, width: width, height: length)
+                : Rect(x: origin.x + offset, y: origin.y, width: length, height: height)
+            offset += length
+            if index + 1 < lengths.count { offset += gap + spaces[index + 1] - overlaps[index] }
+            return region
+        }
+    }
+
+    /// Remainders go to earlier spacer slots.
+    ///
+    /// Fill/min growth precedes flex placement.
+    private func distributedSpaces(_ remaining: Int, count: Int) -> [Int] {
+        guard count > 0 else { return [] }
+        var weights = Array(repeating: 0, count: count + 1)
+        switch flex {
+        case .start:
+            weights[count] = 1
+        case .end:
+            weights[0] = 1
+        case .center:
+            weights[0] = 1
+            weights[count] = 1
+        case .spaceBetween:
+            if count == 1 { weights[count] = 1 } else { for index in 1..<count { weights[index] = 1 } }
+        case .spaceAround:
+            weights = Array(repeating: 2, count: count + 1)
+            weights[0] = 1
+            weights[count] = 1
+        case .spaceEvenly:
+            weights = Array(repeating: 1, count: count + 1)
+        }
+        let totalWeight = weights.reduce(0, +)
+        let share = remaining / totalWeight
+        var extra = remaining % totalWeight
+        return weights.map { weight in
+            let remainder = min(extra, weight)
+            extra -= remainder
+            return share * weight + remainder
         }
     }
 

@@ -113,7 +113,7 @@ public struct Desktop: Widget {
             scroll(byRows: -1)
         case .wheelDown:
             scroll(byRows: 1)
-        case .up:
+        default:
             break
         }
         return nil

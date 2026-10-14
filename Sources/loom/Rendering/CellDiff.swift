@@ -23,11 +23,17 @@ public struct CellDiff {
         lastCursor = nil
     }
 
+    /// Encodes local cells at a physical origin.
+    ///
+    /// Disable `clearScreen` for bounded regions.
+    ///
+    /// A bounded full repaint writes default blanks explicitly and never emits ED 2.
     public mutating func encode(
-        _ next: Buffer, previous: Buffer?, cursor: Point?
+        _ next: Buffer, previous: Buffer?, cursor: Point?,
+        origin: Point = Point(x: 0, y: 0), clearScreen: Bool = true
     ) -> (Data, RenderStats) {
         let sameSize = previous?.width == next.width && previous?.height == next.height
-        var output = sameSize ? "" : "\u{1b}[2J"
+        var output = sameSize || !clearScreen ? "" : "\u{1b}[2J"
         var position: Point?
         var style: Style?
         var activeLink: String?
@@ -41,7 +47,7 @@ public struct CellDiff {
                 // A full repaint starts with ED 2, so default blank cells are
                 // already correct. Writing them all makes startup and resize
                 // visibly slow in terminals that ignore synchronized output.
-                if !sameSize && cell == Cell() {
+                if !sameSize && clearScreen && cell == Cell() {
                     continue
                 }
                 changed += 1
@@ -50,10 +56,10 @@ public struct CellDiff {
                 }
                 let target = Point(x: x, y: y)
                 if position != target {
-                    output += move(target)
+                    output += move(Point(x: origin.x + target.x, y: origin.y + target.y))
                 }
                 if style != cell.style {
-                    output += styleSequence(cell.style)
+                    output += styleSequence(cell.style, previous: style)
                     style = cell.style
                 }
                 let nextLink = hyperlinks ? safeLink(cell.link) : nil
@@ -77,11 +83,15 @@ public struct CellDiff {
         }
         if activeLink != nil { output += "\u{1b}]8;;\u{1b}\\" }
         if !output.isEmpty {
-            output += "\u{1b}[0m"
+            if let style, style.underlineColor != .terminalDefault {
+                output += "\u{1b}[0;59m"
+            } else {
+                output += "\u{1b}[0m"
+            }
         }
         if let validCursor {
             if repainted || lastCursor != validCursor {
-                output += move(validCursor)
+                output += move(Point(x: origin.x + validCursor.x, y: origin.y + validCursor.y))
             }
             if repainted || lastCursor == nil {
                 output += "\u{1b}[?25h"
@@ -103,10 +113,18 @@ public struct CellDiff {
         "\u{1b}[\(point.y+1);\(point.x+1)H"
     }
 
-    private func styleSequence(_ style: Style) -> String {
+    private func styleSequence(_ style: Style, previous: Style?) -> String {
         var codes = ["0"]
+        if style.underlineColor == .terminalDefault,
+            let previous, previous.underlineColor != .terminalDefault
+        {
+            codes.append("59")
+        }
         if style.bold {
             codes.append("1")
+        }
+        if style.dim {
+            codes.append("2")
         }
         if style.italic {
             codes.append("3")
@@ -114,12 +132,35 @@ public struct CellDiff {
         if style.underlined {
             codes.append("4")
         }
+        if style.hidden { codes.append("8") }
+        switch style.blink {
+        case .none: break
+        case .slow: codes.append("5")
+        case .rapid: codes.append("6")
+        }
+        if let underline = underlineCode(style.underlineColor) { codes.append(underline) }
         if style.reversed {
             codes.append("7")
+        }
+        if style.strikethrough {
+            codes.append("9")
         }
         if let foreground = colorCode(style.foreground, foreground: true) { codes.append(foreground) }
         if let background = colorCode(style.background, foreground: false) { codes.append(background) }
         return "\u{1b}[" + codes.joined(separator: ";") + "m"
+    }
+
+    private func underlineCode(_ color: Color) -> String? {
+        guard colorDepth != .monochrome else { return nil }
+        switch color {
+        case .terminalDefault: return nil  // SGR 0 restores the default underline color.
+        case let .indexed(index):
+            return "58;5;\(nearestIndex(index, limit: colorDepth == .ansi16 ? 16 : 256))"
+        case let .rgb(red, green, blue):
+            if colorDepth == .trueColor { return "58;2;\(red);\(green);\(blue)" }
+            let index = nearestPaletteIndex((Int(red), Int(green), Int(blue)), limit: colorDepth == .ansi16 ? 16 : 256)
+            return "58;5;\(index)"
+        }
     }
 
     private func colorCode(_ color: Color, foreground: Bool) -> String? {

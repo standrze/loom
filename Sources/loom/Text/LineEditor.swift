@@ -146,6 +146,14 @@ public struct LineEditor: Sendable {
         delete(range)
     }
 
+    /// Deletes a grapheme-offset range as one edit, preserving the original cursor and selection for undo.
+    ///
+    /// Empty and out-of-bounds ranges do not modify the draft or its undo history.
+    public mutating func delete(in range: Range<Int>) {
+        guard range.lowerBound >= 0, range.upperBound <= text.count else { return }
+        delete(range)
+    }
+
     /// Replaces the preceding grapheme as one undoable edit.
     public mutating func replacePreviousGrapheme(with value: String) {
         guard selection == nil, cursor > 0 else { return }

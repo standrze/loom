@@ -101,3 +101,31 @@ import Testing
     editor.deleteBackward()
     #expect(editor.text == "e\u{301}")
 }
+
+@Test func rangeDeletionRestoresOriginalCaretAndReverseSelectionOnUndo() {
+    var editor = LineEditor()
+    editor.insert("one\n界界 tail")
+    editor.moveCursor(to: 4)
+    editor.delete(in: 4..<7)
+    #expect(editor.text == "one\ntail" && editor.cursor == 4)
+    editor.undo()
+    #expect(editor.text == "one\n界界 tail" && editor.cursor == 4 && editor.selection == nil)
+    editor.moveCursor(to: 9)
+    editor.moveCursor(to: 5, selecting: true)
+    editor.delete(in: 5..<9)
+    editor.undo()
+    #expect(editor.cursor == 5 && editor.selection == 5..<9)
+    editor.redo()
+    #expect(editor.text == "one\n界il" && editor.cursor == 5 && editor.selection == nil)
+}
+
+@Test func invalidRangeDeletionDoesNotConsumeUndoOrChangeTheDraft() {
+    var editor = LineEditor()
+    editor.insert("日本語")
+    editor.delete(in: -1..<1)
+    editor.delete(in: 1..<4)
+    editor.delete(in: 1..<1)
+    #expect(editor.text == "日本語" && editor.cursor == 3)
+    editor.undo()
+    #expect(editor.text.isEmpty)
+}

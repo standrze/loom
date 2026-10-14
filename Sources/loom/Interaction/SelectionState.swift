@@ -7,9 +7,12 @@ public struct SelectionState<ID: Hashable> {
     public private(set) var selectedID: ID?
     public private(set) var markedIDs: Set<ID> = []
     public var scroll = ScrollState()
+    /// Preferred terminal rows around a selection, clamped to fit the viewport.
+    public var revealPadding = 0
     public private(set) var ids: [ID] = []
     private var indices: [ID: Int] = [:]
     private var starts: [Int] = [0]
+    private var reversed = false
 
     public var selectedIndex: Int? { selectedID.flatMap { indices[$0] } }
 
@@ -21,8 +24,10 @@ public struct SelectionState<ID: Hashable> {
     ///
     /// Row heights are at least one. Call after data or geometry changes, before dispatching events. Stateful widgets also
     /// call this when drawing. An unchanged draw does not pull a manually scrolled view back.
-    public mutating func update(ids: [ID], heights: [Int], viewportLength: Int) {
+    public mutating func update(ids: [ID], heights: [Int], viewportLength: Int, reversed: Bool = false) {
         precondition(ids.count == heights.count, "Every item needs a height")
+        let directionChanged = self.reversed != reversed
+        self.reversed = reversed
         let oldIndex = selectedIndex
         let oldIDs = self.ids
         let oldStarts = starts
@@ -40,7 +45,8 @@ public struct SelectionState<ID: Hashable> {
         }
         markedIDs.formIntersection(Set(ids))
         scroll.update(contentLength: starts.last!, viewportLength: viewportLength)
-        if ids != oldIDs || starts != oldStarts || oldViewport != scroll.viewportLength {
+        if directionChanged && reversed && selectedID == nil { scroll.scroll(to: scroll.contentLength) }
+        if directionChanged || ids != oldIDs || starts != oldStarts || oldViewport != scroll.viewportLength {
             revealSelection()
         }
     }
@@ -53,6 +59,7 @@ public struct SelectionState<ID: Hashable> {
 
     public mutating func moveSelection(by distance: Int) {
         guard !ids.isEmpty else { return }
+        let distance = reversed ? (distance == Int.min ? Int.max : -distance) : distance
         guard let index = selectedIndex else {
             select(distance < 0 ? ids.last : ids.first)
             return
@@ -61,17 +68,18 @@ public struct SelectionState<ID: Hashable> {
         select(ids[index + delta])
     }
 
-    public mutating func selectFirst() { select(ids.first) }
-    public mutating func selectLast() { select(ids.last) }
+    public mutating func selectFirst() { select(reversed ? ids.last : ids.first) }
+    public mutating func selectLast() { select(reversed ? ids.first : ids.last) }
 
     /// Moves selection by a viewport of rows, including variable-height items.
     public mutating func pageSelection(by pages: Int) {
         guard !ids.isEmpty, pages != 0 else { return }
         guard let index = selectedIndex else {
-            select(pages < 0 ? ids.last : ids.first)
+            select((pages < 0) != reversed ? ids.last : ids.first)
             return
         }
-        var position = ScrollState(contentLength: scroll.contentLength, viewportLength: 1, offset: starts[index])
+        var position = ScrollState(
+            contentLength: scroll.contentLength, viewportLength: 1, offset: rowRange(at: index).lowerBound)
         let distance = max(1, scroll.viewportLength).multipliedReportingOverflow(by: pages)
         position.scroll(by: distance.overflow ? (pages < 0 ? Int.min : Int.max) : distance.partialValue)
         let target = self.index(atRow: position.offset) ?? index
@@ -87,15 +95,19 @@ public struct SelectionState<ID: Hashable> {
     public mutating func clearMarks() { markedIDs.removeAll() }
 
     public mutating func revealSelection() {
-        if let index = selectedIndex { scroll.reveal(rowRange(at: index)) }
+        if let index = selectedIndex { scroll.reveal(rowRange(at: index), padding: revealPadding) }
     }
 
     /// Content rows occupied by an item; the index must belong to `ids`.
-    public func rowRange(at index: Int) -> Range<Int> { starts[index]..<starts[index + 1] }
+    public func rowRange(at index: Int) -> Range<Int> {
+        if reversed { return (scroll.contentLength - starts[index + 1])..<(scroll.contentLength - starts[index]) }
+        return starts[index]..<starts[index + 1]
+    }
 
     /// Finds the item under a content row using the same geometry as rendering.
     public func index(atRow row: Int) -> Int? {
         guard row >= 0, row < scroll.contentLength else { return nil }
+        let row = reversed ? scroll.contentLength - 1 - row : row
         var lower = 0
         var upper = ids.count
         while lower < upper {
@@ -109,7 +121,7 @@ public struct SelectionState<ID: Hashable> {
         let rows = scroll.visibleRange
         guard !rows.isEmpty, let first = index(atRow: rows.lowerBound), let last = index(atRow: rows.upperBound - 1)
         else { return 0..<0 }
-        return first..<(last + 1)
+        return min(first, last)..<(max(first, last) + 1)
     }
 
     /// Optional default keys; Space toggles marks only when explicitly enabled.

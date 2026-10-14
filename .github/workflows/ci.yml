@@ -1,0 +1,60 @@
+name: Swift validation
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+      - name: Require Swift 6.4 or later
+        run: |
+          swift --version
+          swift --version | python3 -c 'import re,sys; v=re.search(r"Swift version (\d+)\.(\d+)",sys.stdin.read()); assert v and tuple(map(int,v.groups())) >= (6,4), "Swift 6.4 or later is required"'
+      - name: Format, tests, and executable builds (sequential)
+        run: |
+          scripts/check-format.sh
+          swift test
+          swift build --product loom-demo
+          swift build --product loom-browser
+          swift build --product loom-widgets
+          swift build --product loom-viewports
+      - name: macOS PTY checks
+        run: |
+          python3 scripts/smoke.py .build/debug/loom-demo
+          python3 scripts/smoke-browser.py .build/debug/loom-browser
+          python3 scripts/smoke-widgets.py .build/debug/loom-widgets
+          python3 scripts/smoke-viewports.py .build/debug/loom-viewports
+  linux:
+    runs-on: ubuntu-latest
+    container: swift:6.4-noble
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install PTY test runtime
+        run: |
+          apt-get update
+          apt-get install -y python3
+      - name: Format, tests, and executable builds (sequential)
+        run: |
+          swift --version
+          scripts/check-format.sh
+          swift test
+          swift build --product loom-demo
+          swift build --product loom-browser
+          swift build --product loom-widgets
+          swift build --product loom-viewports
+      - name: Linux PTY checks
+        run: |
+          python3 scripts/smoke.py .build/debug/loom-demo
+          python3 scripts/smoke-browser.py .build/debug/loom-browser
+          python3 scripts/smoke-widgets.py .build/debug/loom-widgets
+          python3 scripts/smoke-viewports.py .build/debug/loom-viewports

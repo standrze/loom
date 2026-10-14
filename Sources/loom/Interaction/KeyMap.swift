@@ -71,6 +71,7 @@ public struct KeyChord: Equatable, Sendable {
         case .first: return "First"
         case .last: return "Last"
         case .f2: return "F2"
+        default: return String(describing: key).capitalized
         }
     }
 }

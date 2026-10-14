@@ -12,10 +12,10 @@ writes the changes through [weft](https://github.com/standrze/weft).
 
 | Layer | What you get |
 | --- | --- |
-| Rendering | Double-buffered frames, cell diffs, cursor updates, synchronized output |
+| Rendering | Double-buffered frames, cell diffs, fixed/inline viewports, snapshots, ANSI/headless backends |
 | Text | Unicode cell geometry, wrapping, selection, editable documents, undo/redo |
 | Content | Markdown rendered with Swift Markdown, styled spans, code blocks |
-| Widgets | Lists, tables, scrollbars, panels, menus, text inputs, document views |
+| Widgets | Lists, tables, scrollbars, rich panels, gauges, tabs, menus, text inputs, document views |
 | Interaction | Stable selection, multiselect, scrolling, focus scopes, key bindings and help |
 | Detail | Character art, color blending, symbol animation, terminal color fallbacks |
 
@@ -30,7 +30,7 @@ has not been verified for this release.
 Add the package dependency:
 
 ```swift
-.package(url: "https://github.com/standrze/loom.git", from: "0.1.0")
+.package(url: "https://github.com/standrze/loom.git", from: "0.2.0")
 ```
 
 Then add its product to your target's dependencies:
@@ -72,6 +72,22 @@ multiselect, and modal focus, run `swift run loom-browser`.
 See [collections and interaction](Documentation/Collections.md) for the APIs and
 [the browser example](Examples/Browser/BrowserApplication.swift) for application-owned event routing.
 
+## Feature showcase
+
+Run `swift run loom-widgets` for progress gauges, tabs, styled top/bottom panel
+labels, collection prefixes, column highlighting, and aligned scrollable text.
+See [the implementation guide](Documentation/FeatureGapImplementation.md) for
+style patches, flexible layout, examples, and the validation record. Press **d**
+for custom/merged borders, shadows, measured reverse lists, table margins, and
+extended text styles. [Widget and rendering details](Documentation/WidgetRenderingDetails.md)
+covers wrapping controls, layout caching/overlap, buffer operations, and the
+ANSI/headless backend interface.
+
+[Viewport documentation](Documentation/Viewports.md) covers fixed regions,
+primary-screen inline output, snapshots, and failure recovery. Run `swift run loom-viewports` for the primary-screen inline example, or add
+`--fixed` for a bounded region demonstration. Cursor queries use the published
+weft 0.2.0 dependency through the application's existing input reader.
+
 ## Development
 
 ```sh
@@ -81,6 +97,10 @@ swift build --product loom-demo
 python3 scripts/smoke.py .build/debug/loom-demo
 swift build --product loom-browser
 python3 scripts/smoke-browser.py .build/debug/loom-browser
+swift build --product loom-widgets
+python3 scripts/smoke-widgets.py .build/debug/loom-widgets
+swift build --product loom-viewports
+python3 scripts/smoke-viewports.py .build/debug/loom-viewports
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Version `0.1.0` is an early extraction
@@ -91,3 +111,17 @@ vary between emulators and fonts.
 
 [Apache License 2.0](LICENSE). Dependencies retain their own licenses.
 The banner is an original SVG included in this repository under the same license.
+
+## streaming Markdown
+
+Call `MarkdownText.streaming(sourceSoFar)` with the complete source on each update.
+The snapshot divides `stableSpans` from `pendingSpans` at a top-level block
+boundary: an earlier table is released when another block follows, while the
+last table, list, or quote remains mutable. Tables retain their literal appearance.
+
+Snapshots replace previous snapshots; they are not append-only deltas. At response
+completion, call `MarkdownText.streaming(sourceSoFar, isComplete: true)` and
+rebuild committed output when `requiresFinalReflow` is true. This resolves late
+reference definitions, even without a trailing newline. The host owns terminal
+scrollback and viewport preservation. The parser currently reparses the whole
+source; this API supplies boundaries, not an incremental parsing optimization.

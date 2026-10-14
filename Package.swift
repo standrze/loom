@@ -9,9 +9,11 @@ let package = Package(
         .library(name: "loom", targets: ["loom"]),
         .executable(name: "loom-demo", targets: ["loomDemo"]),
         .executable(name: "loom-browser", targets: ["loomBrowser"]),
+        .executable(name: "loom-widgets", targets: ["loomWidgets"]),
+        .executable(name: "loom-viewports", targets: ["loomViewports"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/standrze/weft.git", from: "0.1.0"),
+        .package(url: "https://github.com/standrze/weft.git", from: "0.2.0"),
         .package(url: "https://github.com/swiftlang/swift-markdown", from: "0.9.0"),
     ],
     targets: [
@@ -22,6 +24,10 @@ let package = Package(
             ]),
         .executableTarget(name: "loomDemo", dependencies: ["loom"], path: "Examples/Demo"),
         .executableTarget(name: "loomBrowser", dependencies: ["loom"], path: "Examples/Browser"),
+        .executableTarget(name: "loomWidgets", dependencies: ["loom"], path: "Examples/Widgets"),
+        .executableTarget(
+            name: "loomViewports", dependencies: ["loom", .product(name: "weft", package: "weft")],
+            path: "Examples/Viewports"),
         .testTarget(name: "loomTests", dependencies: ["loom"]),
     ]
 )
