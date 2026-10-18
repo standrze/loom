@@ -40,9 +40,14 @@ public struct ANSIRenderBackend<B: Backend>: RenderBackend {
                 move(point) + (anchor.x > 0 ? "\r\n" : "")
                 + String(repeating: "\n", count: max(0, value.area.height - 1))
         }
+        // Explicit clears invalidate both logical equality and cached physical occupancy.
+        // A full repaint of the retained area restores cells affected by those clears.
+        if !value.clears.isEmpty || value.anchor != nil { diff.reset() }
         let (data, stats) = diff.encode(
-            value.next.buffer, previous: value.previous?.buffer, cursor: value.next.cursor,
-            origin: Point(x: value.area.x, y: value.area.y), clearScreen: value.clearScreen)
+            value.next.buffer, previous: value.clears.isEmpty && value.anchor == nil ? value.previous?.buffer : nil,
+            cursor: value.next.cursor,
+            origin: Point(x: value.area.x, y: value.area.y),
+            clearScreen: value.clearScreen && value.clears.isEmpty && value.anchor == nil)
         var output = Data(prefix.utf8)
         output.append(data)
         if !output.isEmpty { try backend.write(output) }
@@ -53,14 +58,13 @@ public struct ANSIRenderBackend<B: Backend>: RenderBackend {
         var output = boundedClear(value.oldArea, size: value.terminalSize)
         var physicalRow = value.oldArea.y
         var rowDiff = diff
+        rowDiff.reset()
         rowDiff.synchronizedOutput = false
         for row in 0..<value.content.height {
             var line = Buffer(width: value.terminalSize.width, height: 1)
-            for column in 0..<min(value.content.width, value.terminalSize.width) {
-                let cell = value.content[column, row]
-                guard cell.width > 0, column + cell.width <= value.terminalSize.width else { continue }
-                line.put(cell.symbol, width: cell.width, at: Point(x: column, y: 0), style: cell.style, link: cell.link)
-            }
+            line.copy(
+                from: value.content, region: Rect(y: row, width: value.content.width, height: 1),
+                to: Point(x: 0, y: 0))
             let (bytes, _) = rowDiff.encode(
                 line, previous: nil, cursor: nil, origin: Point(x: 0, y: physicalRow), clearScreen: false)
             output += String(decoding: bytes, as: UTF8.self)

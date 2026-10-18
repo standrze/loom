@@ -37,16 +37,27 @@ public struct CanvasBounds: Equatable, Sendable {
 public enum CanvasMarker: Sendable {
     /// Two columns and four rows of dots per cell.
     case braille
+    case quadrant
+    case sextant
+    case octant
+    /// A single terminal-cell grapheme. Invalid or wide characters paint nothing.
+    case custom(Character)
     case dot
+    /// One point per cell using an open circle.
+    case circle
+    /// One point per cell using a lower half block.
+    case bar
     case block
     /// One column and two rows per cell.
     case halfBlock
 
     var resolution: (x: Int, y: Int) {
         switch self {
-        case .braille: return (2, 4)
+        case .braille, .octant: return (2, 4)
+        case .quadrant: return (2, 2)
+        case .sextant: return (2, 3)
         case .halfBlock: return (1, 2)
-        case .dot, .block: return (1, 1)
+        case .dot, .circle, .bar, .block, .custom: return (1, 1)
         }
     }
 }
@@ -173,6 +184,61 @@ public struct CanvasContext {
         }
     }
 
+    /// Fills vertical raster columns between a segment and an explicit horizontal baseline.
+    ///
+    /// Non-finite inputs paint nothing. Work is bounded by the visible raster, even for
+    /// offscreen endpoints; vertical and zero-length segments fill their baseline column.
+    public mutating func filledLine(
+        from start: CanvasPoint, to end: CanvasPoint, baseline: Double, style: Style? = nil
+    ) {
+        guard start.x.isFinite, start.y.isFinite, end.x.isFinite, end.y.isFinite,
+            baseline.isFinite
+        else { return }
+        if start.x == end.x {
+            line(from: CanvasPoint(x: start.x, y: baseline), to: start, style: style)
+            line(from: CanvasPoint(x: end.x, y: baseline), to: end, style: style)
+            return
+        }
+        // Clip in world x before interpolation. This retains visible diagonals when the
+        // original endpoints are so distant that all visible t parameters round to 0.5.
+        guard
+            let segment = clipped(
+                start, end,
+                lower: CanvasPoint(x: xBounds.min, y: min(start.y, end.y)),
+                upper: CanvasPoint(x: xBounds.max, y: max(start.y, end.y)))
+        else { return }
+        let first = segment.0
+        let last = segment.1
+        let limits = pixelLimits
+        let resolution = marker.resolution
+        let rasterWidth = Double(area.width) * Double(resolution.x) - 1
+        let rasterOrigin = Double(area.x) * Double(resolution.x)
+        let firstColumn = rasterOrigin + xBounds.fraction(first.x) * rasterWidth
+        let lastColumn = rasterOrigin + xBounds.fraction(last.x) * rasterWidth
+        let left = max(limits.0.x, min(firstColumn, lastColumn).rounded())
+        let right = min(limits.1.x, max(firstColumn, lastColumn).rounded())
+        guard left <= right else { return }
+        for column in Int(left)...Int(right) {
+            let fraction = rasterWidth > 0 ? (Double(column) - rasterOrigin) / rasterWidth : 0.5
+            let sampleX = (1 - fraction) * xBounds.min + fraction * xBounds.max
+            // Endpoint columns belong to the segment even when its endpoints fall between
+            // raster samples. Clamp evaluation while retaining the same rounded column.
+            let x = min(max(first.x, last.x), max(min(first.x, last.x), sampleX))
+            let span = last.x - first.x
+            let t: Double
+            if span == 0 {
+                t = 0
+            } else if span.isFinite {
+                t = (x - first.x) / span
+            } else {
+                t = (x / 2 - first.x / 2) / (last.x / 2 - first.x / 2)
+            }
+            let y = (1 - t) * first.y + t * last.y
+            guard y.isFinite else { continue }
+            line(from: CanvasPoint(x: x, y: baseline), to: CanvasPoint(x: x, y: y), style: style)
+        }
+    }
+
     /// Draws an outline or filled rectangle.
     ///
     /// Negative sizes are accepted; zero sizes produce a line or point.
@@ -257,9 +323,19 @@ public struct CanvasContext {
         for (key, cell) in cells {
             let symbol: String
             switch marker {
+            case .quadrant: symbol = CanvasMarkerSymbols.quadrants[cell.bits]
+            case .sextant: symbol = CanvasMarkerSymbols.sextants[cell.bits]
+            case .octant: symbol = CanvasMarkerSymbols.octants[cell.bits]
+            case .custom(let character):
+                let text = String(character)
+                let glyphs = TextLayout(text, width: 2, wrapping: .none).lines.flatMap(\.glyphs)
+                guard glyphs.count == 1, glyphs[0].width == 1, glyphs[0].text == text else { continue }
+                symbol = text
             case .braille: symbol = String(UnicodeScalar(0x2800 + cell.bits)!)
             case .halfBlock: symbol = cell.bits == 3 ? "█" : cell.bits == 1 ? "▀" : "▄"
             case .dot: symbol = "•"
+            case .circle: symbol = "○"
+            case .bar: symbol = "▄"
             case .block: symbol = "█"
             }
             buffer.put(symbol, width: 1, at: Point(x: key.x, y: key.y), style: cell.style)
@@ -302,8 +378,10 @@ public struct CanvasContext {
         case .braille:
             let bits = [[1, 2, 4, 64], [8, 16, 32, 128]]
             bit = bits[x % 2][y % 4]
+        case .quadrant, .sextant, .octant:
+            bit = 1 << ((y % resolution.y) * 2 + x % 2)
         case .halfBlock: bit = 1 << (y % 2)
-        case .dot, .block: bit = 1
+        case .dot, .circle, .bar, .block, .custom: bit = 1
         }
         cells[key] = RasterCell(bits: (cells[key]?.bits ?? 0) | bit, style: style)
     }

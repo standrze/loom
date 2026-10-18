@@ -31,7 +31,8 @@ struct WidgetsDetails {
             frame.render(custom, in: inset)
         }
         let collections = Layout(.horizontal, [.fill(1), .fill(1)], spacing: 1).split(rows[2], cache: &cache)
-        let listPanel = Panel(title: "Reverse + auto-height")
+        let listPanel = Panel(
+            borders: [.left, .right, .bottom], title: "Reverse + auto-height", titlesWithoutBorders: true)
         frame.render(listPanel, in: collections[0])
         var list = List([
             ListItem(id: 0, "First item at bottom\nmeasured second line"),
@@ -41,6 +42,7 @@ struct WidgetsDetails {
         list.reversed = true
         list.automaticHeights = true
         list.selectionSymbol = "> "
+        list.repeatHighlightSymbol = true
         list.prefixReservation = .always
         frame.render(list, in: listPanel.inner(collections[0]), state: &listState)
         let tablePanel = Panel(title: "Table row margins")
@@ -54,6 +56,7 @@ struct WidgetsDetails {
             columns: [TableColumn("Item", width: .length(8)), TableColumn("Details", width: .length(14))],
             rows: [firstRow, secondRow])
         table.automaticHeights = true
+        table.columnFlex = .center
         frame.render(table, in: tablePanel.inner(collections[1]), state: &tableState)
         let styled = [
             TextSpan("Underline color ", style: Style(underlined: true, underlineColor: .indexed(2))),

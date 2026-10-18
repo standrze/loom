@@ -106,12 +106,17 @@ public struct Panel: Widget, Sendable {
     public var borderStyle: Style?
     public var titleStyle: Style?
     public var shadow: PanelShadow?
+    /// Opts titles into borderless edge rows, reserving those rows in `inner(_:)`.
+    ///
+    /// False preserves the requirement that a title's edge have a border.
+    public var titlesWithoutBorders: Bool
 
     public init(
         style: Style = Style(), borders: BorderEdges = .all, borderType: BorderType = .single,
         title: String? = nil, titleAlignment: PanelTitleAlignment = .left,
         padding: PanelPadding = PanelPadding(), titles: [PanelTitle] = [],
-        borderStyle: Style? = nil, titleStyle: Style? = nil, shadow: PanelShadow? = nil
+        borderStyle: Style? = nil, titleStyle: Style? = nil, shadow: PanelShadow? = nil,
+        titlesWithoutBorders: Bool = false
     ) {
         self.style = style
         self.borders = borders
@@ -123,14 +128,15 @@ public struct Panel: Widget, Sendable {
         self.borderStyle = borderStyle
         self.titleStyle = titleStyle
         self.shadow = shadow
+        self.titlesWithoutBorders = titlesWithoutBorders
     }
 
     /// Returns content geometry after border and padding cells have been removed.
     public func inner(_ area: Rect) -> Rect {
         let left = (borders.contains(.left) ? 1 : 0) + max(0, padding.left)
         let right = (borders.contains(.right) ? 1 : 0) + max(0, padding.right)
-        let top = (borders.contains(.top) ? 1 : 0) + max(0, padding.top)
-        let bottom = (borders.contains(.bottom) ? 1 : 0) + max(0, padding.bottom)
+        let top = (reservesTitleRow(.top) ? 1 : 0) + max(0, padding.top)
+        let bottom = (reservesTitleRow(.bottom) ? 1 : 0) + max(0, padding.bottom)
         let xOffset = min(area.width, left)
         let yOffset = min(area.height, top)
         return Rect(
@@ -143,6 +149,12 @@ public struct Panel: Widget, Sendable {
 
     public func render(in area: Rect, buffer: inout Buffer) {
         guard area.width >= 2, area.height >= 2 else {
+            if titlesWithoutBorders && area.width > 0 && area.height > 0 {
+                buffer.withClip(area) { target in
+                    renderTitle(in: area, buffer: &target)
+                    renderRichTitles(in: area, buffer: &target)
+                }
+            }
             return
         }
 
@@ -213,7 +225,7 @@ public struct Panel: Widget, Sendable {
     }
 
     func renderTitle(in area: Rect, buffer: inout Buffer) {
-        guard borders.contains(.top), let title, !title.isEmpty else {
+        guard borders.contains(.top) || titlesWithoutBorders, let title, !title.isEmpty else {
             return
         }
         let start = area.x + (borders.contains(.left) ? 1 : 0)
@@ -246,7 +258,7 @@ public struct Panel: Widget, Sendable {
         guard available > 0 else { return }
         var occupied: [Int: Set<Int>] = [:]
         // The legacy title retains its original geometry and takes precedence.
-        if let title, !title.isEmpty, borders.contains(.top) {
+        if let title, !title.isEmpty, borders.contains(.top) || titlesWithoutBorders {
             let first = String(title.split(separator: "\n", omittingEmptySubsequences: false).first ?? "")
             let layout = TextLayout(" " + first + " ", width: available)
             let width = layout.lines[0].glyphs.last.map { $0.column + $0.width } ?? 0
@@ -256,7 +268,7 @@ public struct Panel: Widget, Sendable {
         }
         for title in titles {
             let edge: BorderEdges = title.position == .top ? .top : .bottom
-            guard borders.contains(edge) else { continue }
+            guard borders.contains(edge) || titlesWithoutBorders else { continue }
             let y = title.position == .top ? area.y : area.maxY - 1
             let layout = TextLayout([TextSpan(" ")] + title.spans + [TextSpan(" ")], width: available)
             let glyphs = layout.lines[0].glyphs
@@ -273,5 +285,13 @@ public struct Panel: Widget, Sendable {
                 occupied[y, default: []].formUnion(columns)
             }
         }
+    }
+
+    private func reservesTitleRow(_ position: PanelTitlePosition) -> Bool {
+        let edge: BorderEdges = position == .top ? .top : .bottom
+        if borders.contains(edge) { return true }
+        guard titlesWithoutBorders else { return false }
+        if position == .top, let title, !title.isEmpty { return true }
+        return titles.contains { $0.position == position }
     }
 }

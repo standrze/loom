@@ -114,3 +114,57 @@ private func sampleTable() -> Table<Int> {
     #expect(state.rows.selectedID == nil)
     #expect(buffer.plainText.contains("No rows"))
 }
+
+@Test func tableColumnFlexSharesLayoutGeometryWithPaintingAndHitTesting() {
+    var table = Table(
+        columns: [TableColumn("A", width: .length(2)), TableColumn("B", width: .length(2))],
+        rows: [TableRow(id: 1, cells: [TableCell("界"), TableCell("XY")])])
+    let area = Rect(x: 1, y: 1, width: 12, height: 2)
+    for flex in Flex.allCases {
+        table.columnFlex = flex
+        let expected = Layout(.horizontal, [.length(2), .length(2)], spacing: 1, flex: flex)
+            .split(Rect(width: area.width, height: 1))
+        #expect(table.columnAreas(width: area.width) == expected)
+        var state = TableState<Int>()
+        var buffer = Buffer(width: 14, height: 4)
+        table.render(in: area, buffer: &buffer, state: &state)
+        #expect(buffer[area.x + expected[0].x, area.y + 1].symbol == "界")
+        #expect(buffer[area.x + expected[0].x + 1, area.y + 1].width == 0)
+        #expect(buffer[area.x + expected[1].x, area.y].symbol == "B")
+        for x in 0..<area.width {
+            let column = expected.firstIndex { x >= $0.x && x < $0.maxX }
+            #expect(table.cell(at: Point(x: area.x + x, y: area.y + 1), in: area, state: state)?.column == column)
+        }
+    }
+}
+
+@Test func tableColumnFlexClampsTinyAreasAndPreservesScrollingAndPrefixGeometry() {
+    var table = Table(
+        columns: [TableColumn("A", width: .length(2)), TableColumn("B", width: .length(2))],
+        rows: [TableRow(id: 1, cells: [TableCell("界"), TableCell("XY")])])
+    table.columnFlex = .end
+    table.selectionSymbol = "> "
+    table.prefixReservation = .always
+    table.minimumWidth = 10
+    var state = TableState(selectedID: 1, selectedColumn: 1)
+    let area = Rect(width: 6, height: 2)
+    var buffer = Buffer(width: 6, height: 2)
+    table.render(in: area, buffer: &buffer, state: &state)
+    #expect(state.horizontal.offset == 6)
+    #expect(buffer[0, 1].symbol == ">")
+    #expect(buffer[4, 1].symbol == "X")
+    #expect(table.cell(at: Point(x: 0, y: 1), in: area, state: state) == nil)
+    #expect(table.cell(at: Point(x: 4, y: 1), in: area, state: state)?.column == 1)
+    table.minimumWidth = 0
+    table.prefixReservation = .never
+    for flex in Flex.allCases {
+        table.columnFlex = flex
+        for width in 0...2 {
+            let tiny = Rect(width: width, height: 2)
+            table.render(in: tiny, buffer: &buffer, state: &state)
+            let regions = table.columnAreas(width: width)
+            #expect(regions.allSatisfy { $0.x >= 0 && $0.maxX <= width })
+            #expect(table.cell(at: Point(x: width, y: 1), in: tiny, state: state) == nil)
+        }
+    }
+}

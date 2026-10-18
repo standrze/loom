@@ -66,8 +66,11 @@ public struct BorderLayer: Sendable {
                 width: 1,
                 at: Point(x: point.x, y: point.y), style: cell.panel.borderStyle ?? cell.panel.style)
         }
-        for entry in entries where entry.area.width >= 2 && entry.area.height >= 2 {
+        for entry in entries where entry.area.width > 0 && entry.area.height > 0 {
             buffer.withClip(entry.area) { target in
+                guard entry.panel.titlesWithoutBorders || (entry.area.width >= 2 && entry.area.height >= 2) else {
+                    return
+                }
                 entry.panel.renderTitle(in: entry.area, buffer: &target)
                 entry.panel.renderRichTitles(in: entry.area, buffer: &target)
             }

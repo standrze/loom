@@ -44,6 +44,10 @@ public struct List<ID: Hashable>: StatefulWidget {
     public var selectionStyle = Style(reversed: true)
     public var markedStyle = Style(bold: true)
     public var selectionSymbol = ""
+    /// Repeats the selection symbol on every terminal row of the selected item, including blank rows.
+    ///
+    /// The prefix width and content geometry are unchanged.
+    public var repeatHighlightSymbol = false
     public var prefixReservation: SelectionPrefixReservation = .never
     public var selectionPatch: StylePatch?
     public var markedPatch: StylePatch?
@@ -117,10 +121,16 @@ public struct List<ID: Hashable>: StatefulWidget {
                 buffer.withClip(rowArea) { buffer in
                     fillCollectionArea(rowArea, style: rowStyle, buffer: &buffer)
                     if selected, prefixWidth > 0 {
-                        paintCollectionText(
-                            [TextSpan(selectionSymbol)],
-                            in: Rect(x: rowArea.x, y: rowArea.y, width: prefixWidth, height: 1), style: rowStyle,
-                            buffer: &buffer)
+                        let first = max(0, area.y, rowArea.y)
+                        let last = min(buffer.height, area.maxY, repeatHighlightSymbol ? rowArea.maxY : rowArea.y + 1)
+                        if first < last {
+                            let prefix = TextLayout(selectionSymbol, width: prefixWidth)
+                            for y in first..<last {
+                                prefix.paint(
+                                    in: Rect(x: rowArea.x, y: y, width: prefixWidth, height: 1),
+                                    style: rowStyle, buffer: &buffer)
+                            }
+                        }
                     }
                     if let renderRow {
                         buffer.withClip(contentArea) { buffer in

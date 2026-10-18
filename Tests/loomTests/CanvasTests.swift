@@ -186,3 +186,111 @@ private let canvasBounds = CanvasBounds(min: 0, max: 1)
     #expect(buffer[0, 4].symbol == "█")
     #expect(buffer[4, 0].symbol == " ")
 }
+
+@Test func canvasSingleCellMarkersHaveIndependentGlyphs() {
+    let markers: [(CanvasMarker, String)] = [(.dot, "•"), (.circle, "○"), (.bar, "▄"), (.block, "█")]
+    for (marker, glyph) in markers {
+        var buffer = Buffer(width: 2, height: 2)
+        Canvas(xBounds: canvasBounds, yBounds: canvasBounds, marker: marker) { context in
+            context.point(at: CanvasPoint(x: 1, y: 0))
+        }.render(in: buffer.area, buffer: &buffer)
+        #expect(buffer.plainText == "  \n \(glyph)")
+    }
+}
+
+@Test func canvasHalfBlockKeepsIndependentUpperAndLowerPixels() {
+    for (ys, glyph) in [([1.0], "▀"), ([0.0], "▄"), ([0.0, 1.0], "█")] {
+        var buffer = Buffer(width: 1, height: 1)
+        Canvas(xBounds: canvasBounds, yBounds: canvasBounds, marker: .halfBlock) { context in
+            for y in ys { context.point(at: CanvasPoint(x: 0, y: y)) }
+        }.render(in: buffer.area, buffer: &buffer)
+        #expect(buffer[0, 0].symbol == glyph)
+    }
+}
+
+@Test func canvasFilledLinePaintsBetweenSlopedLineAndBaseline() {
+    var buffer = Buffer(width: 3, height: 3)
+    Canvas(xBounds: canvasBounds, yBounds: canvasBounds, marker: .block) { context in
+        context.filledLine(from: CanvasPoint(x: 0, y: 0), to: CanvasPoint(x: 1, y: 1), baseline: 0)
+    }.render(in: buffer.area, buffer: &buffer)
+    #expect(buffer.plainText == "  █\n ██\n███")
+}
+
+@Test func canvasFilledLineClipsHugeEndpointsAndRejectsNonfiniteBaseline() {
+    let huge = Double.greatestFiniteMagnitude
+    var buffer = Buffer(width: 5, height: 3)
+    buffer.withClip(Rect(x: 1, y: 1, width: 3, height: 1)) { target in
+        Canvas(xBounds: canvasBounds, yBounds: canvasBounds, marker: .block) { context in
+            context.filledLine(from: CanvasPoint(x: -huge, y: 1), to: CanvasPoint(x: huge, y: 1), baseline: -huge)
+        }.render(in: target.area, buffer: &target)
+    }
+    #expect(buffer.plainText == "     \n ███ \n     ")
+    buffer.reset()
+    Canvas(xBounds: canvasBounds, yBounds: canvasBounds) { context in
+        context.filledLine(from: CanvasPoint(x: 0, y: 1), to: CanvasPoint(x: 1, y: 1), baseline: .nan)
+    }.render(in: buffer.area, buffer: &buffer)
+    #expect(buffer.plainText == "     \n     \n     ")
+}
+
+@Test func canvasDenseMarkersCoverEveryRowMajorMask() {
+    let markers: [(CanvasMarker, Int, [String])] = [
+        (.quadrant, 2, CanvasMarkerSymbols.quadrants),
+        (.sextant, 3, CanvasMarkerSymbols.sextants),
+        (.octant, 4, CanvasMarkerSymbols.octants),
+    ]
+    for (marker, rows, symbols) in markers {
+        #expect(Set(symbols).count == 1 << (2 * rows))
+        for mask in 1..<(1 << (2 * rows)) {
+            var buffer = Buffer(width: 1, height: 1)
+            Canvas(xBounds: canvasBounds, yBounds: canvasBounds, marker: marker) { context in
+                for row in 0..<rows {
+                    for column in 0..<2 where mask & (1 << (row * 2 + column)) != 0 {
+                        context.point(at: CanvasPoint(x: Double(column), y: 1 - Double(row) / Double(rows - 1)))
+                    }
+                }
+            }.render(in: buffer.area, buffer: &buffer)
+            #expect(buffer[0, 0].symbol == symbols[mask])
+        }
+    }
+    #expect(CanvasMarkerSymbols.quadrants[9] == "▚")
+    #expect(CanvasMarkerSymbols.sextants[21] == "▌")
+    #expect(CanvasMarkerSymbols.sextants[42] == "▐")
+    #expect(CanvasMarkerSymbols.octants[1] == "\u{1CEA8}")
+    #expect(CanvasMarkerSymbols.octants[128] == "\u{1CEA0}")
+    #expect(CanvasMarkerSymbols.octants[20] == "\u{1FBE6}")
+}
+
+@Test func canvasCustomMarkerRequiresOneCompleteTerminalCell() {
+    for (character, expected): (Character, String) in [("x", "x"), ("界", " "), ("\n", " "), ("e\u{301}", "e\u{301}")] {
+        var buffer = Buffer(width: 1, height: 1)
+        Canvas(xBounds: canvasBounds, yBounds: canvasBounds, marker: .custom(character)) { context in
+            context.point(at: CanvasPoint(x: 0, y: 0))
+        }.render(in: buffer.area, buffer: &buffer)
+        #expect(buffer[0, 0].symbol == expected)
+    }
+}
+
+@Test func canvasFilledLineRetainsHugeDiagonalCrossings() {
+    let bounds = CanvasBounds(min: -1, max: 1)
+    for huge in [1e300, Double.greatestFiniteMagnitude] {
+        var buffer = Buffer(width: 3, height: 3)
+        Canvas(xBounds: bounds, yBounds: bounds, marker: .block) { context in
+            context.filledLine(
+                from: CanvasPoint(x: -huge, y: -huge), to: CanvasPoint(x: huge, y: huge), baseline: -1)
+        }.render(in: buffer.area, buffer: &buffer)
+        #expect(buffer.plainText == "  █\n ██\n███")
+    }
+}
+
+@Test func canvasFilledLineCoversSubpixelSegmentsAndSingleColumnAreas() {
+    for width in [1, 3] {
+        var buffer = Buffer(width: width, height: 3)
+        Canvas(xBounds: canvasBounds, yBounds: canvasBounds, marker: .block) { context in
+            context.filledLine(from: CanvasPoint(x: 0.1, y: 1), to: CanvasPoint(x: 0.2, y: 1), baseline: 0)
+        }.render(in: buffer.area, buffer: &buffer)
+        for y in 0..<3 {
+            #expect(buffer[0, y].symbol == "█")
+            if width > 1 { #expect(buffer[1, y].symbol == " ") }
+        }
+    }
+}

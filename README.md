@@ -127,3 +127,6 @@ rebuild committed output when `requiresFinalReflow` is true. This resolves late
 reference definitions, even without a trailing newline. The host owns terminal
 scrollback and viewport preservation. The parser currently reparses the whole
 source; this API supplies boundaries, not an incremental parsing optimization.
+
+[API customization](Documentation/APICustomization.md) covers repeated list prefixes, column flex,
+per-line alignment, borderless titles, plotting controls, and explicit diff policies.

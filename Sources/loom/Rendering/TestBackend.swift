@@ -71,7 +71,7 @@ public struct TestBackend: RenderBackend, Sendable {
             let sameSize =
                 frame.previous?.buffer.width == frame.next.buffer.width
                 && frame.previous?.buffer.height == frame.next.buffer.height
-            if frame.clearScreen && !sameSize {
+            if frame.clearScreen && !sameSize && !frame.next.buffer.hasSkippedCells {
                 try step { $0.screen.reset() }
             }
             try paint(frame.next.buffer, at: Point(x: frame.area.x, y: frame.area.y), clip: frame.area)
@@ -153,8 +153,16 @@ public struct TestBackend: RenderBackend, Sendable {
     private mutating func paintRow(_ buffer: Buffer, row: Int, at point: Point, clip: Rect) throws {
         try step { backend in
             backend.screen.withClip(clip) { screen in
-                screen.copy(
-                    from: buffer, region: Rect(y: row, width: buffer.width, height: 1), to: point)
+                let allowed = buffer.presentationMask(
+                    row: row, previous: screen, origin: Point(x: point.x, y: point.y - row))
+                for x in 0..<buffer.width {
+                    let cell = buffer[x, row]
+                    guard cell.width > 0, allowed[x] else { continue }
+                    let target = Point(x: point.x + x, y: point.y)
+                    screen.put(
+                        cell.symbol, width: cell.width, at: target, style: cell.style, link: cell.link,
+                        diffPolicy: cell.width > 2 || cell.symbol.count > 1 ? .forcedWidth(cell.width) : .automatic)
+                }
             }
         }
     }
