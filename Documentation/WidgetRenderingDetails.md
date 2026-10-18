@@ -2,7 +2,8 @@
 
 This increment extends the earlier feature-gap implementation. Existing widget
 and ANSI terminal defaults remain unchanged. It does not establish complete
-Ratatui parity or native Windows console support.
+Ratatui parity. Native Windows support is provided by weft 0.2.1; see
+[platform support](PlatformSupport.md).
 
 ## Borders and shadows
 
@@ -114,6 +115,15 @@ partial output. It interprets semantic updates, not arbitrary ANSI input.
 `RecordingBackend` continues to support byte assertions. No SVG renderer is
 included.
 
+## Explicit presentation policies — unreleased
+
+[PR #2](https://github.com/standrze/loom/pull/2) adds `CellDiffPolicy` with
+`.automatic`, `.skip`, `.alwaysUpdate`, and `.forcedWidth(Int)`. Policies retain
+complete glyph footprints and ordinary Unicode geometry. Forced-width writes
+still reject terminal controls. ANSI and headless backends track physical
+occupancy consistently across skips. See [API customization](APICustomization.md)
+for reservation, clearing, and recovery boundaries.
+
 ## Demonstration and validation
 
 Run `loom-widgets` and press `d` to view the details screen. Press `d` again to
@@ -125,7 +135,10 @@ browser, widget, and viewport PTY scripts serially. Logical cell tests, ANSI byt
 tests, and PTY checks cover separate contracts; they do not establish live
 terminal-emulator compatibility or successful Linux execution.
 
-### Validation record: 2026-10-13
+Current validation and platform evidence are linked from the
+[documentation index](README.md). The record below describes the earlier increment.
+
+### Historical validation record: 2026-10-13
 
 Validated locally on macOS arm64 with Apple Swift 6.4:
 
@@ -143,5 +156,5 @@ history, and failures before/after primitive mutations. Driver tests verify
 snapshot invalidation and explicit recovery after uncertain output. Byte tests
 cover underline-color downgrade/reset, hidden text, and blinking.
 
-These results are local and uncommitted. No Linux runtime, remote CI, native
+At the time of this historical record, these results were local and uncommitted. No Linux runtime, remote CI, native
 Windows backend, or live terminal-emulator attribute rendering is claimed.

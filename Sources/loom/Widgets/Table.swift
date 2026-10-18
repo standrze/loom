@@ -134,6 +134,10 @@ public struct Table<ID: Hashable>: StatefulWidget {
     public var columns: [TableColumn]
     public var rows: [TableRow<ID>]
     public var columnSpacing = 1
+    /// Places unused horizontal cells around columns after widths and column spacing are reserved.
+    ///
+    /// Uses the same allocation and remainder rules as `Layout`.
+    public var columnFlex: Flex = .start
     /// Measures body text using the final column widths.
     public var automaticHeights = false
     public var wrapping: TextWrapping = .grapheme
@@ -173,7 +177,7 @@ public struct Table<ID: Hashable>: StatefulWidget {
         let width = max(0, max(width, minimumWidth))
         let gaps = max(0, columns.count - 1)
         let spacing = gaps > 0 ? min(max(0, columnSpacing), width / gaps) : 0
-        let regions = Layout(.horizontal, columns.map(\.width))
+        let regions = Layout(.horizontal, columns.map(\.width), flex: columnFlex)
             .split(Rect(width: width - gaps * spacing, height: 1))
         return regions.enumerated().map { index, region in
             Rect(x: region.x + index * spacing, width: region.width, height: 1)

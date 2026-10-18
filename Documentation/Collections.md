@@ -243,3 +243,17 @@ Collection `wrapping` and `wrapOptions` configure both automatic measurement and
 painting, so word wrapping, whitespace trimming, and custom tab widths use identical
 geometry. A reversed list initially reveals its first item at the viewport bottom;
 subsequent unchanged updates preserve manual scrolling.
+
+## Additional collection controls
+
+Released in 0.2.1: `List.reversed`, list/table `automaticHeights`,
+`List.measureRow`, and `TableRow.topMargin` / `bottomMargin` share measured
+paint and hit geometry. See [widget details](WidgetRenderingDetails.md).
+
+Unreleased in [PR #2](https://github.com/standrze/loom/pull/2):
+`List.repeatHighlightSymbol = true` repeats the selected prefix on every visible
+physical item row, including blank/custom rows. Its default is false.
+`Table.columnFlex` distributes leftover space with the existing `Flex` modes
+(default `.start`); headers, body, horizontal scrolling and hit testing all use
+`columnAreas(width:)`. Neither option changes copied source text. See
+[API customization](APICustomization.md) for the full contracts.

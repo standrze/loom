@@ -1,5 +1,9 @@
 # Feature gap implementation
 
+This is a historical implementation record. For current release boundaries,
+remaining gaps, and validation evidence, see the [documentation index](README.md)
+and [audit status update](RatatuiAudit.md#status-update-2026-10-18).
+
 The [feature gap plan](FeatureGapPlan.md) describes two milestones. The first
 adds style composition, flexible layout and text placement, common widgets, and
 collection options. The standalone `loom-widgets` executable demonstrates those

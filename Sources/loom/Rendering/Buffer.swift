@@ -59,14 +59,29 @@ public struct Buffer: Sendable {
     }
 
     /// Writes a whole grapheme or nothing, preventing half-wide characters at a clip edge.
+    /// With `.forcedWidth(span)`, accepts multiple safe graphemes occupying that explicit
+    /// positive span. The caller owns terminal width accuracy; Unicode layout is unchanged.
 
     public mutating func put(
-        _ symbol: String, width span: Int, at point: Point, style: Style = Style(), link: String? = nil
+        _ symbol: String, width span: Int, at point: Point, style: Style = Style(), link: String? = nil,
+        diffPolicy: CellDiffPolicy = .automatic
     ) {
-        guard symbol.count == 1,
-            span == 1 || span == 2,
+        if case .forcedWidth(let forced) = diffPolicy, forced != span { return }
+        write(
+            symbol, width: span, at: point, style: style, link: link, diffPolicy: diffPolicy,
+            explicitWidth: diffPolicy == .forcedWidth(span))
+    }
+
+    private mutating func write(
+        _ symbol: String, width span: Int, at point: Point, style: Style, link: String?,
+        diffPolicy: CellDiffPolicy, explicitWidth: Bool
+    ) {
+        guard !symbol.isEmpty,
+            explicitWidth || symbol.count == 1,
+            span > 0,
+            explicitWidth || span == 1 || span == 2,
             clip.contains(point),
-            point.x + span <= clip.maxX
+            span <= clip.maxX - point.x
         else {
             return
         }
@@ -82,21 +97,28 @@ public struct Buffer: Sendable {
 
         // Replacing part of an existing wide glyph must not erase cells outside
         // the current clip. Leave the crossing glyph intact instead.
-        for column in point.x..<point.x + span {
-            let occupant = cells[point.y * width + column]
-            let leading = occupant.width == 0 ? column - 1 : column
+        var column = point.x
+        while column < point.x + span {
+            let leading = leadingColumn(x: column, y: point.y)
             guard leading >= clip.x else { return }
-            let occupantWidth = cells[point.y * width + leading].width
-            guard leading + occupantWidth <= clip.maxX else { return }
+            let end = leading + cells[point.y * width + leading].width
+            guard end <= clip.maxX else { return }
+            column = max(column + 1, end)
         }
-        for column in point.x..<point.x + span {
+        column = point.x
+        while column < point.x + span {
+            let leading = leadingColumn(x: column, y: point.y)
+            let end = leading + cells[point.y * width + leading].width
             clearOccupant(x: column, y: point.y)
+            column = max(column + 1, end)
         }
 
         let index = point.y * width + point.x
-        cells[index] = Cell(symbol: symbol, width: span, style: style, link: link)
-        if span == 2 {
-            cells[index + 1] = Cell(symbol: "", width: 0, style: style, link: link)
+        cells[index] = Cell(symbol: symbol, width: span, style: style, link: link, diffPolicy: diffPolicy)
+        if span > 1 {
+            for offset in 1..<span {
+                cells[index + offset] = Cell(symbol: "", width: 0, style: style, link: link, diffPolicy: diffPolicy)
+            }
         }
     }
 
@@ -107,7 +129,7 @@ public struct Buffer: Sendable {
             return
         }
 
-        let leadingColumn = self[point.x, point.y].width == 0 ? point.x - 1 : point.x
+        let leadingColumn = leadingColumn(x: point.x, y: point.y)
         guard leadingColumn >= 0 else {
             return
         }
@@ -167,8 +189,10 @@ public struct Buffer: Sendable {
         let bottom = min(source.height, regionEnd(region.y, length: region.height))
         guard left < right, top < bottom else { return }
         for y in top..<bottom {
-            for x in left..<right {
+            var x = left
+            while x < right {
                 let cell = source[x, y]
+                defer { x += max(1, cell.width) }
                 guard cell.width > 0, x + cell.width <= right else { continue }
                 let dx = x.subtractingReportingOverflow(region.x)
                 let dy = y.subtractingReportingOverflow(region.y)
@@ -176,9 +200,9 @@ public struct Buffer: Sendable {
                 let targetX = destination.x.addingReportingOverflow(dx.partialValue)
                 let targetY = destination.y.addingReportingOverflow(dy.partialValue)
                 guard !targetX.overflow, !targetY.overflow else { continue }
-                put(
+                write(
                     cell.symbol, width: cell.width, at: Point(x: targetX.partialValue, y: targetY.partialValue),
-                    style: cell.style, link: cell.link)
+                    style: cell.style, link: cell.link, diffPolicy: cell.diffPolicy, explicitWidth: true)
             }
         }
     }
@@ -202,6 +226,64 @@ public struct Buffer: Sendable {
         self = resized(width: width, height: height, preservingContents: preservingContents)
     }
 
+    /// Sets presentation policy for complete glyphs inside the region and current clip.
+    ///
+    /// Copies retain the policy; subsequent writes replace it with their own policy.
+    /// Skipped cells survive ordinary frame painting, but explicit clears and scrolling
+    /// still affect their terminal area. A forced width must match each existing glyph's
+    /// stored span; mismatched glyphs are unchanged. Use `put` to create a new span.
+    public mutating func setDiffPolicy(_ policy: CellDiffPolicy, in region: Rect) {
+        withClip(region) { buffer in
+            for y in buffer.clip.y..<buffer.clip.maxY {
+                for x in buffer.clip.x..<buffer.clip.maxX {
+                    let cell = buffer[x, y]
+                    guard cell.width > 0, x + cell.width <= buffer.clip.maxX else { continue }
+                    if case .forcedWidth(let span) = policy, span != cell.width { continue }
+                    for column in x..<x + cell.width {
+                        buffer.cells[y * buffer.width + column].diffPolicy = policy
+                    }
+                }
+            }
+        }
+    }
+
+    var hasSkippedCells: Bool { cells.contains { $0.diffPolicy == .skip } }
+
+    /// Resolves complete old and new glyph protection in linear time per row.
+    ///
+    /// `origin` maps this buffer's coordinates into the previous physical buffer.
+    func presentationMask(row: Int, previous: Buffer?, origin: Point = Point(x: 0, y: 0)) -> [Bool] {
+        var skipPrefix = Array(repeating: 0, count: width + 1)
+        var protected = Array(repeating: false, count: width)
+        for x in 0..<width {
+            protected[x] = self[x, row].diffPolicy == .skip
+            skipPrefix[x + 1] = skipPrefix[x] + (protected[x] ? 1 : 0)
+        }
+        if let previous, row + origin.y >= 0, row + origin.y < previous.height {
+            let oldRow = row + origin.y
+            var x = 0
+            while x < previous.width {
+                let span = max(1, previous[x, oldRow].width)
+                let left = max(0, min(width, x - origin.x))
+                let right = max(left, min(width, x + span - origin.x))
+                if skipPrefix[right] > skipPrefix[left] {
+                    for column in left..<right { protected[column] = true }
+                }
+                x += span
+            }
+        }
+        var result = Array(repeating: false, count: width)
+        var x = 0
+        while x < width {
+            let span = max(1, self[x, row].width)
+            let end = min(width, x + span)
+            let allowed = !protected[x..<end].contains(true)
+            for column in x..<end { result[column] = allowed }
+            x = end
+        }
+        return result
+    }
+
     /// Returns cell-level changes, including removed cells and wide-glyph continuation cells.
     public func differences(from previous: Buffer) -> [BufferDifference] {
         var result: [BufferDifference] = []
@@ -223,14 +305,17 @@ public struct Buffer: Sendable {
         return end.overflow ? Int.max : end.partialValue
     }
 
+    func leadingColumn(x: Int, y: Int) -> Int {
+        var column = x
+        while column > 0 && self[column, y].width == 0 { column -= 1 }
+        return column
+    }
+
     private mutating func clearOccupant(x: Int, y: Int) {
-        let index = y * width + x
-        if cells[index].width == 0 && x > 0 {
-            cells[index - 1] = Cell()
+        let leading = leadingColumn(x: x, y: y)
+        let span = self[leading, y].width
+        for column in leading..<min(width, leading + max(1, span)) {
+            cells[y * width + column] = Cell()
         }
-        if cells[index].width == 2 && x + 1 < width {
-            cells[index + 1] = Cell()
-        }
-        cells[index] = Cell()
     }
 }

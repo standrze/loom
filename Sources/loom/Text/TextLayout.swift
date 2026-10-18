@@ -55,6 +55,8 @@ public struct TextLayout: Sendable {
     }
     public struct Line: Sendable {
         public var glyphs: [Glyph] = []
+        /// Nil inherits the paragraph's alignment; soft wraps retain their source line's value.
+        public var alignment: CellAlignment?
         /// Original code and panel styling for this laid-out row, including soft wraps.
         public private(set) var codeBlock: TextCodeBlock?
         public private(set) var isCodeBlockHeader = false
@@ -135,9 +137,32 @@ public struct TextLayout: Sendable {
 
     public init(
         _ text: String, width: Int, wrapping: TextWrapping = .grapheme, options: TextWrapOptions = TextWrapOptions(),
+        lineAlignments: [CellAlignment?] = [],
         measure: (Character) -> Int = terminalCellWidth
     ) {
-        self.init([TextSpan(text)], width: width, wrapping: wrapping, options: options, measure: measure)
+        self.init(
+            [TextSpan(text)], width: width, wrapping: wrapping, options: options,
+            lineAlignments: lineAlignments, measure: measure)
+    }
+
+    /// Joins styled lines with literal newlines, retaining per-line alignment on soft wraps.
+    public init(
+        lines: [TextLine], width: Int, wrapping: TextWrapping = .grapheme,
+        options: TextWrapOptions = TextWrapOptions(), measure: (Character) -> Int = terminalCellWidth
+    ) {
+        var spans: [TextSpan] = []
+        var alignments: [CellAlignment?] = []
+        for (index, line) in lines.enumerated() {
+            if index > 0 { spans.append(TextSpan("\n")) }
+            spans.append(contentsOf: line.spans)
+            let newlines = line.spans.reduce(0) { count, span in
+                count + span.text.unicodeScalars.filter { $0 == "\n" }.count
+            }
+            alignments.append(contentsOf: repeatElement(line.alignment, count: newlines + 1))
+        }
+        self.init(
+            spans, width: width, wrapping: wrapping, options: options,
+            lineAlignments: alignments, measure: measure)
     }
 
     /// Lays out styled spans as one source string.
@@ -148,6 +173,7 @@ public struct TextLayout: Sendable {
     public init(
         _ spans: [TextSpan], width: Int, wrapping: TextWrapping = .grapheme,
         continuationPrefix: TextSpan? = nil, options: TextWrapOptions = TextWrapOptions(),
+        lineAlignments: [CellAlignment?] = [],
         measure: (Character) -> Int = terminalCellWidth
     ) {
         // Keep literal newlines and tabs for copying, remove terminal-control characters.
@@ -179,7 +205,8 @@ public struct TextLayout: Sendable {
             styleEnds.append((endByteOffset, span))
         }
         self.nonCopyableRanges = nonCopyableRanges
-        var lines = [Line()]
+        var logicalLine = 0
+        var lines = [Line(alignment: lineAlignments.first ?? nil)]
         var column = 0
         var byteOffset = 0
         var spanIndex = 0
@@ -200,7 +227,7 @@ public struct TextLayout: Sendable {
             let prefix = explicitPrefix ?? quotePrefix
             let prefixWidth = explicitPrefix.map { $0.reduce(0) { $0 + $1.width } } ?? quotePrefixWidth
             let repeatsPrefix = !readingPrefix && prefixWidth + 2 <= layoutWidth
-            lines.append(Line())
+            lines.append(Line(alignment: lines.last?.alignment))
             column = 0
             hasCopyableContent = false
             guard repeatsPrefix else { return }
@@ -226,7 +253,9 @@ public struct TextLayout: Sendable {
             defer { byteOffset += sanitizedSource[range].utf8.count }
             if character == "\n" {
                 lines[lines.count - 1].recordCodeBlock(sourceSpan)
-                lines.append(Line())
+                logicalLine += 1
+                lines.append(
+                    Line(alignment: lineAlignments.indices.contains(logicalLine) ? lineAlignments[logicalLine] : nil))
                 column = 0
                 startsWord = true
                 softWrapped = false
@@ -426,7 +455,7 @@ public struct TextLayout: Sendable {
         guard lines.indices.contains(row) else { return 0 }
         let lineWidth = lines[row].glyphs.last.map { $0.column + $0.width } ?? 0
         let available = max(0, viewportWidth - min(max(0, viewportWidth), lineWidth))
-        switch alignment {
+        switch lines[row].alignment ?? alignment {
         case .left: return 0
         case .center: return available / 2
         case .right: return available

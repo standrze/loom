@@ -268,3 +268,54 @@ import Testing
     #expect(buffer[0, 0].style == Style(italic: true))
     #expect(buffer[plot.maxX - 6, plot.y].style == Style(foreground: .indexed(3)))
 }
+
+@Test func chartLegendAllPerimeterPositionsUseUnicodeCellWidth() {
+    let positions: [(ChartLegendPosition, Int, Int)] = [
+        (.topLeft, 1, 0), (.top, 4, 0), (.topRight, 8, 0),
+        (.left, 1, 3), (.right, 8, 3),
+        (.bottomLeft, 1, 6), (.bottom, 4, 6), (.bottomRight, 8, 6),
+    ]
+    for (position, x, y) in positions {
+        var chart = Chart(datasets: [ChartDataset(name: "界", points: [])])
+        chart.legendPosition = position
+        var buffer = Buffer(width: 12, height: 8)
+        chart.render(in: buffer.area, buffer: &buffer)
+        #expect(buffer[x, y].symbol == "•")
+        #expect(buffer[x + 2, y].symbol == "界")
+        #expect(buffer[x + 3, y].width == 0)
+    }
+}
+
+@Test func chartLegendLimitsIncludeExactBoundaryAndHideInvalidRatios() {
+    var chart = Chart(datasets: [ChartDataset(name: "界", points: [])])
+    chart.legendWidthLimit = .cells(4)
+    chart.legendHeightLimit = .ratio(1.0 / 7)
+    var buffer = Buffer(width: 12, height: 8)
+    chart.render(in: buffer.area, buffer: &buffer)
+    #expect(buffer[8, 0].symbol == "•")
+    for limit in [ChartLegendLimit.cells(3), .ratio(.nan), .ratio(-1), .ratio(0)] {
+        chart.legendWidthLimit = limit
+        buffer.reset()
+        chart.render(in: buffer.area, buffer: &buffer)
+        #expect(buffer[8, 0].symbol == " ")
+    }
+}
+
+@Test func chartFilledLineUsesExplicitBaselineAndSeparateFillStyle() {
+    let line = Style(foreground: .indexed(1))
+    let fill = Style(foreground: .indexed(2))
+    var chart = Chart(
+        datasets: [
+            ChartDataset(
+                points: [CanvasPoint(x: 0, y: 1), CanvasPoint(x: 1, y: 1)],
+                graphType: .filledLine, marker: .block, style: line, baseline: 0.5, fillStyle: fill)
+        ],
+        xAxis: ChartAxis(bounds: CanvasBounds(min: 0, max: 1)),
+        yAxis: ChartAxis(bounds: CanvasBounds(min: 0, max: 1)))
+    chart.legendPosition = .hidden
+    var buffer = Buffer(width: 4, height: 4)
+    chart.render(in: buffer.area, buffer: &buffer)
+    #expect(buffer[2, 0].style == line)
+    #expect(buffer[2, 1].style == fill)
+    #expect(buffer[2, 2].symbol == " ")
+}

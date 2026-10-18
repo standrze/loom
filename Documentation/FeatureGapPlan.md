@@ -1,5 +1,9 @@
 **Plan to close loom's highest-value feature gaps**
 
+This is a historical implementation record. For current release boundaries,
+remaining gaps, and validation evidence, see the [documentation index](README.md)
+and [audit status update](RatatuiAudit.md#status-update-2026-10-18).
+
 Implementation status is recorded in [the implementation guide](FeatureGapImplementation.md).
 
 Prepared 2026-10-13 from the [ratatui feature audit](RatatuiAudit.md). This records the original proposed plan; its features have since been implemented.

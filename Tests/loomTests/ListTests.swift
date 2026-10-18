@@ -101,3 +101,69 @@ import Testing
     #expect(buffer[6, 0].symbol == " ")
     #expect(buffer[0, 1].symbol == "A")
 }
+
+@Test func listRepeatedHighlightPrefixesUseWrappedAndExplicitRows() {
+    var list = List([ListItem(id: 1, "abcdef"), ListItem(id: 2, "tail")])
+    list.selectionSymbol = "> "
+    list.prefixReservation = .always
+    list.automaticHeights = true
+    var state = SelectionState(selectedID: 1)
+    let area = Rect(width: 5, height: 4)
+    var buffer = Buffer(width: 5, height: 4)
+    list.render(in: area, buffer: &buffer, state: &state)
+    #expect(buffer[0, 0].symbol == ">")
+    #expect(buffer[0, 1].symbol == " ")
+    list.repeatHighlightSymbol = true
+    list.render(in: area, buffer: &buffer, state: &state)
+    #expect(state.rowRange(at: 0).count == 2)
+    #expect(buffer[0, 1].symbol == ">")
+    #expect(buffer[2, 1].symbol == "d")
+    #expect(buffer[0, 2].symbol == " ")
+    #expect(list.item(at: Point(x: 0, y: 1), in: area, state: state) == 1)
+    list.automaticHeights = false
+    list.items[0].height = 3
+    list.items[0].spans = [TextSpan("a\nb")]
+    list.render(in: area, buffer: &buffer, state: &state)
+    #expect(buffer[0, 2].symbol == ">")
+    #expect(buffer[2, 2].symbol == " ")
+    #expect(list.item(at: Point(x: 0, y: 2), in: area, state: state) == 1)
+}
+
+@Test func listRepeatedPrefixesFollowReversedPartiallyVisibleRowsAndWideCells() {
+    var list = List([ListItem(id: 1, "a\nb\nc", height: 3), ListItem(id: 2, "x", height: 2)])
+    list.selectionSymbol = "界"
+    list.prefixReservation = .always
+    list.repeatHighlightSymbol = true
+    list.reversed = true
+    var state = SelectionState(selectedID: 1)
+    let area = Rect(x: 1, y: 1, width: 4, height: 2)
+    list.update(in: area, state: &state)
+    state.scroll.scroll(to: 3)
+    var buffer = Buffer(width: 6, height: 4)
+    list.render(in: area, buffer: &buffer, state: &state)
+    for y in 1...2 {
+        #expect(buffer[1, y].symbol == "界")
+        #expect(buffer[2, y].width == 0)
+        #expect(list.item(at: Point(x: 2, y: y), in: area, state: state) == 1)
+    }
+    #expect(buffer[3, 1].symbol == "b")
+    #expect(buffer[3, 2].symbol == "c")
+    #expect(buffer[1, 0].symbol == " ")
+    #expect(buffer[1, 3].symbol == " ")
+}
+
+@Test func repeatedListPrefixesStayBoundedByVisibleRowsForVeryTallItems() {
+    var list = List([ListItem(id: 1, "Tall", height: 1_000_000)])
+    list.selectionSymbol = ">"
+    list.repeatHighlightSymbol = true
+    list.prefixReservation = .always
+    var state = SelectionState(selectedID: 1)
+    let area = Rect(width: 4, height: 2)
+    list.update(in: area, state: &state)
+    state.scroll.scroll(to: 900_000)
+    var buffer = Buffer(width: 4, height: 2)
+    list.render(in: area, buffer: &buffer, state: &state)
+    #expect(buffer[0, 0].symbol == ">")
+    #expect(buffer[0, 1].symbol == ">")
+    #expect(list.item(at: Point(x: 0, y: 1), in: area, state: state) == 1)
+}

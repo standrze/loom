@@ -9,6 +9,10 @@ public struct CellDiff {
     public var colorDepth: TerminalColorDepth
     public var hyperlinks: Bool
     private var lastCursor: Point?
+    // Logical frames may contain skipped cells that were never presented.
+    // Keep actual emitted occupancy separately for subsequent overlap protection.
+    private var presentedBuffer: Buffer?
+    private var presentedOrigin: Point?
 
     public init(
         synchronizedOutput: Bool = true, colorDepth: TerminalColorDepth = .trueColor,
@@ -21,6 +25,8 @@ public struct CellDiff {
 
     public mutating func reset() {
         lastCursor = nil
+        presentedBuffer = nil
+        presentedOrigin = nil
     }
 
     /// Encodes local cells at a physical origin.
@@ -33,21 +39,43 @@ public struct CellDiff {
         origin: Point = Point(x: 0, y: 0), clearScreen: Bool = true
     ) -> (Data, RenderStats) {
         let sameSize = previous?.width == next.width && previous?.height == next.height
-        var output = sameSize || !clearScreen ? "" : "\u{1b}[2J"
+        let clearsScreen = clearScreen && !next.hasSkippedCells
+        let fullClear = !sameSize && clearsScreen
+        let physical: Buffer?
+        if fullClear {
+            physical = nil
+        } else if presentedOrigin == origin, let presentedBuffer {
+            physical =
+                presentedBuffer.width == next.width && presentedBuffer.height == next.height
+                ? presentedBuffer : presentedBuffer.resized(width: next.width, height: next.height)
+        } else {
+            physical = previous
+        }
+        var presented = physical ?? Buffer(width: next.width, height: next.height)
+        var output = fullClear ? "\u{1b}[2J" : ""
         var position: Point?
         var style: Style?
         var activeLink: String?
         var changed = 0
         for y in 0..<next.height {
+            let allowed = next.presentationMask(row: y, previous: physical)
             for x in 0..<next.width {
                 let cell = next[x, y]
-                guard !sameSize || cell != previous![x, y] else {
+                guard allowed[x] else { continue }
+                let physicalCell = physical.flatMap { x < $0.width && y < $0.height ? $0[x, y] : nil }
+                let matchesPhysical =
+                    physicalCell.map {
+                        $0.symbol == cell.symbol && $0.width == cell.width && $0.style == cell.style
+                            && $0.link == cell.link
+                    } ?? false
+                guard cell.diffPolicy == .alwaysUpdate || !sameSize || cell != previous![x, y] || !matchesPhysical
+                else {
                     continue
                 }
                 // A full repaint starts with ED 2, so default blank cells are
                 // already correct. Writing them all makes startup and resize
                 // visibly slow in terminals that ignore synchronized output.
-                if !sameSize && clearScreen && cell == Cell() {
+                if !sameSize && clearsScreen && cell == Cell() {
                     continue
                 }
                 changed += 1
@@ -69,6 +97,9 @@ public struct CellDiff {
                     activeLink = nextLink
                 }
                 output += cell.symbol
+                presented.copy(
+                    from: next, region: Rect(x: x, y: y, width: cell.width, height: 1),
+                    to: Point(x: x, y: y))
                 position = Point(x: x + cell.width, y: y)
             }
         }
@@ -102,6 +133,8 @@ public struct CellDiff {
             }
         }
         lastCursor = validCursor
+        presentedBuffer = presented
+        presentedOrigin = origin
         if !output.isEmpty && synchronizedOutput {
             output = "\u{1b}[?2026h" + output + "\u{1b}[?2026l"
         }

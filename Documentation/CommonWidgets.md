@@ -43,7 +43,10 @@ can still occupy padding. Only the first assigned row is interactive.
 
 Panel retains `title: String?`, its alignment, and the old padded single-title
 behavior. Its additional `titles` accept styled spans at either edge. Titles only
-appear when their corresponding border is enabled. `borderStyle` and `titleStyle`
+appear when their corresponding border is enabled by default. The unreleased
+`titlesWithoutBorders: true` option in [PR #2](https://github.com/standrze/loom/pull/2)
+also paints titles on absent edges; `inner(_:)` reserves those title rows once,
+and `BorderLayer` uses the same geometry. `borderStyle` and `titleStyle`
 fall back to `style`; explicit span styles override title style, and span patches
 compose over the inherited or explicit style. Titles receive one blank cell at
 each end and use their first laid-out row. The legacy title has first priority,

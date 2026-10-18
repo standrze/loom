@@ -8,6 +8,18 @@
 from text, layouts, and widgets. loom compares it with the previous frame and
 writes the changes through [weft](https://github.com/standrze/weft).
 
+## Documentation
+
+[Getting started](https://swiftloom.dev/docs/loom/) ·
+[Stable API reference](https://swiftloom.dev/docs/loom/api/) ·
+[Guides and release status](Documentation/README.md)
+
+The current published release is **0.2.1**. This branch also contains the
+unreleased [API customization](Documentation/APICustomization.md) increment in
+[PR #2](https://github.com/standrze/loom/pull/2). Its repeated list prefixes,
+column flex, border-independent titles, per-line alignment, extra plotting
+controls, and specialized diff policies are not in the 0.2.1 tag.
+
 ## A canvas made of cells
 
 | Layer | What you get |
@@ -105,8 +117,8 @@ swift build --product loom-viewports
 python3 scripts/smoke-viewports.py .build/debug/loom-viewports
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Version `0.1.0` is an early extraction
-from ono-sendai; APIs may change before 1.0. Terminal behavior and character widths
+See [CONTRIBUTING.md](CONTRIBUTING.md). loom began as an extraction from
+ono-sendai; APIs may change before 1.0. Terminal behavior and character widths
 vary between emulators and fonts.
 
 ## License

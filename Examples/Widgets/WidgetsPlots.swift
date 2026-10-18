@@ -16,7 +16,7 @@ struct WidgetsPlots {
         renderBars(in: barPanel.inner(upper[0]), frame: &frame)
         let chartPanel = Panel(title: "Chart: throughput")
         frame.render(chartPanel, in: upper[1])
-        let chart = Chart(
+        var chart = Chart(
             datasets: [
                 ChartDataset(
                     name: "alpha",
@@ -24,7 +24,8 @@ struct WidgetsPlots {
                         CanvasPoint(x: 0, y: 0), CanvasPoint(x: 1, y: 3), CanvasPoint(x: 2, y: 1),
                         CanvasPoint(x: 3, y: 4),
                     ],
-                    style: Style(foreground: .indexed(6))),
+                    graphType: .filledLine, style: Style(foreground: .indexed(6)),
+                    baseline: 0, fillStyle: Style(foreground: .indexed(4))),
                 ChartDataset(
                     name: "beta",
                     points: [
@@ -39,11 +40,16 @@ struct WidgetsPlots {
             yAxis: ChartAxis(
                 bounds: CanvasBounds(min: 0, max: 4),
                 labels: [ChartAxisLabel(value: 0, text: "0"), ChartAxisLabel(value: 4, text: "4")]))
+        chart.legendPosition = .bottom
+        chart.legendWidthLimit = .ratio(0.7)
+        chart.legendHeightLimit = .cells(2)
         frame.render(chart, in: chartPanel.inner(upper[1]))
         let lower = Layout(.horizontal, [.fill(1), .length(23)], spacing: 1).split(sections[3])
         let canvasPanel = Panel(title: "Canvas: layered shapes")
         frame.render(canvasPanel, in: lower[0])
-        let canvas = Canvas(xBounds: CanvasBounds(min: -10, max: 10), yBounds: CanvasBounds(min: -5, max: 5)) {
+        let canvas = Canvas(
+            xBounds: CanvasBounds(min: -10, max: 10), yBounds: CanvasBounds(min: -5, max: 5), marker: .quadrant
+        ) {
             context in
             context.rectangle(
                 origin: CanvasPoint(x: -8, y: -3), width: 16, height: 6, style: Style(foreground: .indexed(4)))

@@ -7,6 +7,8 @@ public enum ChartGraphType: Equatable, Sendable {
     case scatter
     case line
     case bar
+    /// Fill between consecutive points and the dataset baseline, then draw the line.
+    case filledLine
 }
 
 /// One series in chart coordinates; ordering is retained for line segments.
@@ -16,16 +18,23 @@ public struct ChartDataset: Sendable {
     public var graphType: ChartGraphType
     public var marker: CanvasMarker
     public var style: Style
+    /// Horizontal baseline for filled lines; non-finite values suppress the fill.
+    public var baseline: Double
+    /// Nil uses the dataset style.
+    public var fillStyle: Style?
 
     public init(
         name: String? = nil, points: [CanvasPoint], graphType: ChartGraphType = .line,
-        marker: CanvasMarker = .braille, style: Style = Style()
+        marker: CanvasMarker = .braille, style: Style = Style(),
+        baseline: Double = 0, fillStyle: Style? = nil
     ) {
         self.name = name
         self.points = points
         self.graphType = graphType
         self.marker = marker
         self.style = style
+        self.baseline = baseline
+        self.fillStyle = fillStyle
     }
 }
 
@@ -84,9 +93,31 @@ public struct ChartAxis: Sendable {
 public enum ChartLegendPosition: Equatable, Sendable {
     case topLeft
     case topRight
+    case top
+    case left
+    case right
     case bottomLeft
     case bottomRight
+    case bottom
     case hidden
+}
+
+/// Maximum legend size on one axis.
+///
+/// Invalid ratios hide the legend.
+public enum ChartLegendLimit: Equatable, Sendable {
+    case cells(Int)
+    case ratio(Double)
+    case unlimited
+
+    func allows(_ size: Int, available: Int) -> Bool {
+        switch self {
+        case .cells(let maximum): return size <= max(0, maximum)
+        case .ratio(let fraction):
+            return fraction.isFinite && fraction >= 0 && Double(size) <= Double(available) * fraction
+        case .unlimited: return true
+        }
+    }
 }
 
 /// A stateless chart with independently styled datasets, axes, custom ticks, and an optional legend.
@@ -102,6 +133,8 @@ public struct Chart: Widget, Sendable {
     public var yAxis: ChartAxis
     public var style: Style
     public var legendPosition: ChartLegendPosition = .topRight
+    public var legendWidthLimit: ChartLegendLimit = .unlimited
+    public var legendHeightLimit: ChartLegendLimit = .unlimited
     /// Nil inherits the chart appearance; an explicit style replaces it.
     public var legendStyle: Style?
 
@@ -156,7 +189,24 @@ public struct Chart: Widget, Sendable {
                         for point in dataset.points where finite(point) {
                             context.point(at: point, style: datasetStyle)
                         }
-                    case .line:
+                    case .line, .filledLine:
+                        if dataset.graphType == .filledLine {
+                            var previous: CanvasPoint?
+                            for point in dataset.points {
+                                guard finite(point) else {
+                                    previous = nil
+                                    continue
+                                }
+                                if let previous {
+                                    context.filledLine(
+                                        from: previous, to: point, baseline: dataset.baseline,
+                                        style: collectionStyle(
+                                            datasetStyle, overlay: dataset.fillStyle ?? dataset.style))
+                                }
+                                previous = point
+                            }
+                            context.newLayer()
+                        }
                         var previous: CanvasPoint?
                         for point in dataset.points {
                             guard finite(point) else {
@@ -264,10 +314,21 @@ public struct Chart: Widget, Sendable {
         let width = (entries.map { textWidth([TextSpan($0.0)]) }.max() ?? 0) + 2
         // A legend must leave both uncovered rows and uncovered columns for data.
         guard width < plot.width, entries.count < plot.height else { return }
-        let left = legendPosition == .topLeft || legendPosition == .bottomLeft
-        let top = legendPosition == .topLeft || legendPosition == .topRight
-        let x = left ? plot.x : plot.maxX - width
-        let y = top ? plot.y : plot.maxY - entries.count
+        guard legendWidthLimit.allows(width, available: plot.width),
+            legendHeightLimit.allows(entries.count, available: plot.height)
+        else { return }
+        let x: Int
+        switch legendPosition {
+        case .topLeft, .left, .bottomLeft: x = plot.x
+        case .top, .bottom: x = plot.x + (plot.width - width) / 2
+        default: x = plot.maxX - width
+        }
+        let y: Int
+        switch legendPosition {
+        case .topLeft, .top, .topRight: y = plot.y
+        case .left, .right: y = plot.y + (plot.height - entries.count) / 2
+        default: y = plot.maxY - entries.count
+        }
         let legend = Rect(x: x, y: y, width: width, height: entries.count)
         let appearance = legendStyle ?? style
         buffer.withClip(legend) { target in
