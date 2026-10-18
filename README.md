@@ -23,14 +23,15 @@ Your application owns state and event handling. loom owns the frame.
 
 ## Add it with SwiftPM
 
-Requires **Swift 6.4+**. The package declares **macOS 13+** and includes Linux
-terminal code; this initial release was validated locally on macOS. Linux support
-has not been verified for this release.
+Requires **Swift 6.4+**. CI pins Swift 6.4.1 and validates macOS, Linux under both
+C and C.UTF-8 locales, and Windows. Native console sessions and child PTYs are
+provided by weft. See [platform support](Documentation/PlatformSupport.md) for
+validation details and Windows operation boundaries.
 
 Add the package dependency:
 
 ```swift
-.package(url: "https://github.com/standrze/loom.git", from: "0.2.0")
+.package(url: "https://github.com/standrze/loom.git", from: "0.2.1")
 ```
 
 Then add its product to your target's dependencies:
@@ -87,7 +88,7 @@ Cartesian Chart, layered Canvas, and a monthly calendar; see [plotting and calen
 [Viewport documentation](Documentation/Viewports.md) covers fixed regions,
 primary-screen inline output, snapshots, and failure recovery. Run `swift run loom-viewports` for the primary-screen inline example, or add
 `--fixed` for a bounded region demonstration. Cursor queries use the published
-weft 0.2.0 dependency through the application's existing input reader.
+weft 0.2.1 dependency through the application's existing input reader.
 
 ## Development
 

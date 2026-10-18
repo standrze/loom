@@ -5,9 +5,9 @@ installed Xcode has a compatible compiler. Linux runs separate C and C.UTF-8
 locale jobs. Windows builds/tests the library and every example using the native
 console and ConPTY infrastructure in the matching weft dependency.
 
-The initial dependency pin is an exact candidate commit while both repositories
-are validated together. It must not be described as a semver release until that
-release exists and the package is switched back to a version requirement.
+loom 0.2.1 requires weft 0.2.1 or newer. The matched release includes the
+locale-independent width policy and native Windows implementations; older weft
+releases do not contain these fixes.
 
 ## Unicode geometry
 
@@ -40,5 +40,7 @@ Local on 2026-10-18:
 - Linux PTY: weft standard/extended Escape, feature/handoff, and job-control checks passed;
   all four loom PTY checks, including plots/calendar and inline/fixed viewports, passed.
 
-Hosted macOS/Linux/Windows runs validate the exact published candidate commits.
-Record those results after completion; configuring the jobs is not a passing result.
+The [platform workflow](https://github.com/standrze/loom/actions/workflows/ci.yml)
+checks each published revision on macOS, Linux in both locales, and Windows.
+weft separately runs real ConPTY children and private-console restoration/input
+checks; the loom Windows cell tests alone cannot establish session correctness.

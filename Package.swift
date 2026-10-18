@@ -13,7 +13,7 @@ let package = Package(
         .executable(name: "loom-viewports", targets: ["loomViewports"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/standrze/weft.git", revision: "b65b817a46973b5752cb4ca14ed5f94c2b57a244"),
+        .package(url: "https://github.com/standrze/weft.git", from: "0.2.1"),
         .package(url: "https://github.com/swiftlang/swift-markdown", from: "0.9.0"),
     ],
     targets: [
