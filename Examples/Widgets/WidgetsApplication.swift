@@ -2,8 +2,10 @@ import loom
 
 /// A standalone composition; filtering, sorting, focus, and input policy remain application-owned.
 struct WidgetsApplication {
-    private enum Action { case quit, filter, sort, focus, logDown, logRight, align, details }
+    private enum Action { case quit, filter, sort, focus, logDown, logRight, align, details, plots }
     private var showingDetails = false
+    private var showingPlots = false
+    private let plots = WidgetsPlots()
     private var details = WidgetsDetails()
     private var tableState = TableState(selectedID: 0)
     private var filtered = false
@@ -26,6 +28,7 @@ struct WidgetsApplication {
             KeyBinding(.focus, keys: [KeyChord(.tab)], help: "table/log"),
             KeyBinding(.logDown, keys: [KeyChord(.character("l"))], help: "log down"),
             KeyBinding(.logRight, keys: [KeyChord(.character("h"))], help: "log right"),
+            KeyBinding(.plots, keys: [KeyChord(.character("p"))], help: "plots/calendar"),
             KeyBinding(.details, keys: [KeyChord(.character("d"))], help: "details"),
             KeyBinding(.align, keys: [KeyChord(.character("a"))], help: "align log"),
         ])
@@ -62,6 +65,10 @@ struct WidgetsApplication {
     }
 
     mutating func render(_ frame: inout Frame) {
+        if showingPlots {
+            plots.render(&frame)
+            return
+        }
         if showingDetails {
             details.render(&frame)
             return
@@ -118,7 +125,12 @@ struct WidgetsApplication {
         if let action = bindings.action(for: event) {
             switch action {
             case .quit: return false
-            case .details: showingDetails.toggle()
+            case .details:
+                showingDetails.toggle()
+                showingPlots = false
+            case .plots:
+                showingPlots.toggle()
+                showingDetails = false
             case .filter: filtered.toggle()
             case .sort: descending.toggle()
             case .focus: logFocused.toggle()
@@ -128,6 +140,7 @@ struct WidgetsApplication {
             }
             return true
         }
+        if showingPlots { return true }
         if case let .mouse(mouse) = event {
             if mouse.kind == .down, let tab = tabs.hitTest(mouse.position, in: tabsArea) {
                 filtered = tab == "ready"

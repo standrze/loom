@@ -15,7 +15,7 @@ writes the changes through [weft](https://github.com/standrze/weft).
 | Rendering | Double-buffered frames, cell diffs, fixed/inline viewports, snapshots, ANSI/headless backends |
 | Text | Unicode cell geometry, wrapping, selection, editable documents, undo/redo |
 | Content | Markdown rendered with Swift Markdown, styled spans, code blocks |
-| Widgets | Lists, tables, scrollbars, rich panels, gauges, tabs, menus, text inputs, document views |
+| Widgets | Lists, tables, panels, gauges, tabs, charts, Canvas, calendar, menus, text inputs, document views |
 | Interaction | Stable selection, multiselect, scrolling, focus scopes, key bindings and help |
 | Detail | Character art, color blending, symbol animation, terminal color fallbacks |
 
@@ -23,14 +23,15 @@ Your application owns state and event handling. loom owns the frame.
 
 ## Add it with SwiftPM
 
-Requires **Swift 6.4+**. The package declares **macOS 13+** and includes Linux
-terminal code; this initial release was validated locally on macOS. Linux support
-has not been verified for this release.
+Requires **Swift 6.4+**. CI pins Swift 6.4.1 and validates macOS, Linux under both
+C and C.UTF-8 locales, and Windows. Native console sessions and child PTYs are
+provided by weft. See [platform support](Documentation/PlatformSupport.md) for
+validation details and Windows operation boundaries.
 
 Add the package dependency:
 
 ```swift
-.package(url: "https://github.com/standrze/loom.git", from: "0.2.0")
+.package(url: "https://github.com/standrze/loom.git", from: "0.2.1")
 ```
 
 Then add its product to your target's dependencies:
@@ -81,12 +82,13 @@ style patches, flexible layout, examples, and the validation record. Press **d**
 for custom/merged borders, shadows, measured reverse lists, table margins, and
 extended text styles. [Widget and rendering details](Documentation/WidgetRenderingDetails.md)
 covers wrapping controls, layout caching/overlap, buffer operations, and the
-ANSI/headless backend interface.
+ANSI/headless backend interface. Press **p** for Sparkline, grouped BarChart,
+Cartesian Chart, layered Canvas, and a monthly calendar; see [plotting and calendars](Documentation/Plotting.md).
 
 [Viewport documentation](Documentation/Viewports.md) covers fixed regions,
 primary-screen inline output, snapshots, and failure recovery. Run `swift run loom-viewports` for the primary-screen inline example, or add
 `--fixed` for a bounded region demonstration. Cursor queries use the published
-weft 0.2.0 dependency through the application's existing input reader.
+weft 0.2.1 dependency through the application's existing input reader.
 
 ## Development
 

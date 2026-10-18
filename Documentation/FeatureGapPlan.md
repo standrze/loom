@@ -2,7 +2,8 @@
 
 Implementation status is recorded in [the implementation guide](FeatureGapImplementation.md).
 
-Prepared 2026-10-13 from the [ratatui feature audit](RatatuiAudit.md). This is a proposed implementation plan; the features below have not been implemented. The initial scope is reusable terminal interfaces on loom's existing platforms. A second milestone adds managed terminal viewports. Full ratatui parity is not the completion criterion.
+Prepared 2026-10-13 from the [ratatui feature audit](RatatuiAudit.md). This records the original proposed plan; its features have since been implemented.
+The [plotting/calendar follow-up](Plotting.md) also closes the five missing widget families. The initial scope is reusable terminal interfaces on loom's existing platforms. A second milestone adds managed terminal viewports. Full ratatui parity is not the completion criterion.
 
 The first milestone should ship as four reviewable changes. Each change includes public API documentation, focused behavioral tests and an example call site. Work continues within the existing Rendering, Text, Widgets and Interaction organization, with lowercase `loom` naming and the checked-in formatting rules. Application state, routing and scheduling remain application-owned; terminal sessions and input/output authority remain in weft. Existing uncommitted work is the baseline to preserve.
 

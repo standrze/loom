@@ -1,6 +1,7 @@
 **loom versus ratatui — feature audit, 2026-10-13**
 
-This is the pre-implementation baseline. See [the implementation record](FeatureGapImplementation.md) for changes made after the audit.
+This is the pre-implementation baseline. See [the implementation record](FeatureGapImplementation.md)
+and [plotting/calendar coverage](Plotting.md) for changes made after the audit.
 
 loom has the basic immediate-mode TUI foundation and substantial interaction and text functionality. Its largest gaps against ratatui are visualization widgets, managed terminal viewports, layout flexibility, composable styling, and some customization options on existing widgets.
 

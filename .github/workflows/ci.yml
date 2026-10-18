@@ -1,4 +1,4 @@
-name: Swift validation
+name: Swift platform validation
 
 on:
   push:
@@ -10,16 +10,19 @@ permissions:
 
 jobs:
   macos:
-    runs-on: macos-latest
+    runs-on: macos-15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - uses: maxim-lobanov/setup-xcode@v1
+      # Install the requested swift.org toolchain independently of the runner's Xcode default.
+      - uses: compnerd/gha-setup-swift@775d3f4111c5be58a0f62f2efdd353bb8fac15c7
         with:
-          xcode-version: latest-stable
-      - name: Require Swift 6.4 or later
+          swift-version: swift-6.4.1-release
+          swift-build: 6.4.1-RELEASE
+      - name: Check toolchain
         run: |
           swift --version
-          swift --version | python3 -c 'import re,sys; v=re.search(r"Swift version (\d+)\.(\d+)",sys.stdin.read()); assert v and tuple(map(int,v.groups())) >= (6,4), "Swift 6.4 or later is required"'
+          swift --version | python3 -c 'import re,sys; assert re.search(r"Swift version 6\.4\.1\b", sys.stdin.read()), "Swift 6.4.1 is required"'
       - name: Format, tests, and executable builds (sequential)
         run: |
           scripts/check-format.sh
@@ -35,17 +38,24 @@ jobs:
           python3 scripts/smoke-widgets.py .build/debug/loom-widgets
           python3 scripts/smoke-viewports.py .build/debug/loom-viewports
   linux:
-    runs-on: ubuntu-latest
-    container: swift:6.4-noble
+    runs-on: ubuntu-24.04
+    container: swift:6.4.1-noble
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        locale: [C, C.UTF-8]
+    env:
+      LANG: ${{ matrix.locale }}
+      LC_ALL: ${{ matrix.locale }}
     steps:
       - uses: actions/checkout@v4
       - name: Install PTY test runtime
-        run: |
-          apt-get update
-          apt-get install -y python3
+        run: apt-get update && apt-get install -y --no-install-recommends python3
       - name: Format, tests, and executable builds (sequential)
         run: |
           swift --version
+          swift --version | python3 -c 'import re,sys; assert re.search(r"Swift version 6\.4\.1\b", sys.stdin.read()), "Swift 6.4.1 is required"'
           scripts/check-format.sh
           swift test
           swift build --product loom-demo
@@ -58,3 +68,31 @@ jobs:
           python3 scripts/smoke-browser.py .build/debug/loom-browser
           python3 scripts/smoke-widgets.py .build/debug/loom-widgets
           python3 scripts/smoke-viewports.py .build/debug/loom-viewports
+  windows:
+    runs-on: windows-2025
+    timeout-minutes: 35
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: compnerd/gha-setup-swift@775d3f4111c5be58a0f62f2efdd353bb8fac15c7
+        with:
+          swift-version: swift-6.4.1-release
+          swift-build: 6.4.1-RELEASE
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - name: Check toolchain
+        run: |
+          $version = swift --version | Out-String
+          Write-Output $version
+          if ($LASTEXITCODE -ne 0 -or $version -notmatch 'Swift version 6\.4\.1\b') { throw 'Swift 6.4.1 is required' }
+      - name: Tests and executable builds (sequential)
+        run: |
+          swift test
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          foreach ($product in @('loom-demo', 'loom-browser', 'loom-widgets', 'loom-viewports')) {
+            swift build --product $product
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
