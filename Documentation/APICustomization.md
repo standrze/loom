@@ -1,5 +1,9 @@
 # Collection, text, plotting, and presentation customization
 
+**Unreleased:** implemented in [PR #2](https://github.com/standrze/loom/pull/2),
+source revision `0ac2ae4`; not included in loom 0.2.1. See the
+[unreleased API reference](https://swiftloom.dev/docs/loom/api-next/).
+
 These APIs are opt-in. Existing initialization, Unicode measurement, wrapping,
 left-aligned text, list prefix behavior, table placement, and bordered titles
 retain their defaults. Applications continue to own state and input routing.
@@ -109,5 +113,7 @@ they do not claim compatibility with arbitrary raw terminal protocols.
 The integrated suite has 315 tests. On macOS, formatter lint, all tests, all four
 example builds, and the demo/browser/widget/viewport PTY checks pass. In an
 isolated Linux Swift 6.4.1 container, all 315 tests pass separately under `C` and
-`C.UTF-8`, and the updated widget PTY check passes. The checked-in CI matrix also
-builds/tests Windows; local macOS/Linux results do not substitute for that job.
+`C.UTF-8`, and the updated widget PTY check passes. The [completed CI run](https://github.com/standrze/loom/actions/runs/39126908787)
+passed 315 tests and all four executable builds on macOS, Windows, and Linux
+under both locales. macOS and Linux also passed all four PTY scripts. Native
+Windows console/ConPTY checks belong to weft; font appearance remains terminal-specific.

@@ -1,7 +1,28 @@
 **loom versus ratatui — feature audit, 2026-10-13**
 
-This is the pre-implementation baseline. See [the implementation record](FeatureGapImplementation.md)
-and [plotting/calendar coverage](Plotting.md) for changes made after the audit.
+## Status update: 2026-10-18
+
+The original audit below is a **historical pre-implementation baseline**, not a
+current missing-feature list. Ratatui 0.30.2 remains the comparison boundary.
+
+| Original gap | Current status |
+| --- | --- |
+| Sparkline, BarChart, Chart, Canvas, monthly calendar | Available in 0.2.1; [plotting guide](Plotting.md) |
+| Style patches, gauges/tabs/fills, rich titles, collection selection | Available in 0.2.1; [implementation record](FeatureGapImplementation.md) |
+| Fixed/inline viewports and public headless backend | Available in 0.2.1; [viewport guide](Viewports.md) |
+| Custom/merged borders, shadows, reverse/measured lists, row margins, wrapping | Available in 0.2.1; [widget details](WidgetRenderingDetails.md) |
+| Layout flex/cache/overlap, buffer operations, underline color, hidden/blink | Available in 0.2.1; [widget details](WidgetRenderingDetails.md) |
+| Linux combining width and native Windows sessions/ConPTY | Addressed in matched loom/weft 0.2.1; [platform evidence and limits](PlatformSupport.md) |
+| Repeated prefixes, column flex, independent titles, per-line alignment | Implemented in unreleased PR #2; [customization guide](APICustomization.md) |
+| Additional markers, legend placement/limits, filled lines, explicit diff policies | Implemented in unreleased PR #2; [customization guide](APICustomization.md) |
+| Bundled world map data | Still absent; needs a separately reviewed dataset and provenance |
+| Other terminal backends and complete upstream API/pixel compatibility | Not claimed; loom provides ANSI and semantic headless backends |
+
+See the [documentation index](README.md) for stable and unreleased references.
+Specialized ecosystem widgets, every upstream option, emulator/font compatibility,
+and comparative performance remain outside this remediation's completion claim.
+
+## Original audit: 2026-10-13
 
 loom has the basic immediate-mode TUI foundation and substantial interaction and text functionality. Its largest gaps against ratatui are visualization widgets, managed terminal viewports, layout flexibility, composable styling, and some customization options on existing widgets.
 

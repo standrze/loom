@@ -82,7 +82,7 @@ let chart = Chart(
 frame.render(chart, in: area)
 ```
 
-Each dataset can be `.line`, `.scatter`, or `.bar`, with its own marker, name,
+Each released dataset can be `.line`, `.scatter`, or `.bar`, with its own marker, name,
 and style. Line order is retained; non-finite coordinate pairs break segments
 and do not affect automatic bounds. Bar graphs use a zero baseline clamped into
 the y bounds. For an all-positive/all-negative dataset, include zero in explicit
@@ -129,6 +129,24 @@ flushes before writing unwrapped Unicode text, preserving wide-glyph clipping.
 Unpainted cells are retained. `CanvasShape` and `context.draw` permit reusable
 custom shapes; no bundled world-map dataset or geographic projection library is
 included.
+
+## Additional plotting controls — unreleased
+
+[PR #2](https://github.com/standrze/loom/pull/2) adds:
+
+- `.filledLine` datasets with a configurable `baseline` (default zero) and
+  optional `fillStyle`; `CanvasContext.filledLine` exposes the same primitive.
+  Nonfinite points break segments, and fill work is bounded by the visible raster.
+- `.circle`, `.bar`, `.quadrant`, `.sextant`, `.octant`, and `.custom(Character)`
+  markers alongside the released markers. Custom glyphs must occupy one printable
+  terminal cell; newer block glyphs depend on terminal/font support.
+- Eight perimeter legend positions, plus `.hidden`, and independent
+  `legendWidthLimit` / `legendHeightLimit` using `.cells`, `.ratio`, or `.unlimited`.
+  Defaults retain the released top-right strict-fit behavior.
+
+See [API customization](APICustomization.md) for examples, clipping contracts,
+Unicode glyph licensing, and the separate provenance requirement for future map
+data. No geographic dataset is bundled.
 
 ## Monthly calendar
 
@@ -180,7 +198,10 @@ geometry. PTY coverage exercises the showcase and resizes it wide/narrow/tiny.
 Native font appearance and cross-platform emulator support remain separate
 validation tasks.
 
-### Validation record: 2026-10-17
+Current integrated evidence is linked from the [documentation index](README.md).
+The record below describes the original plotting increment.
+
+### Historical validation record: 2026-10-17
 
 Validated locally on macOS arm64 with Apple Swift 6.4:
 

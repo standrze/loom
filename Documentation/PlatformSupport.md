@@ -33,7 +33,16 @@ headless cell tests alone do not establish mode restoration or process behavior.
 
 ## Validation record
 
-Local on 2026-10-18:
+The published 0.2.1 [loom CI run](https://github.com/standrze/loom/actions/runs/39098352119)
+and [weft CI run](https://github.com/standrze/weft/actions/runs/39097945629)
+passed their macOS, Linux (both locales), and Windows jobs. weft's Windows job
+exercises native console input/restoration and real ConPTY child processes.
+
+The unreleased customization increment at `0ac2ae4` passed
+[315 tests and all four executable builds across the same matrix](https://github.com/standrze/loom/actions/runs/39126908787),
+plus all four PTY checks on macOS and Linux. This is separate from release 0.2.1.
+
+Historical local platform-remediation checks on 2026-10-18:
 
 - macOS arm64: 283 loom tests passed in an isolated checkout against the patched weft.
 - Linux arm64 Swift 6.4.1: 65 weft and 283 loom tests passed under both C and C.UTF-8.
