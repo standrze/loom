@@ -294,3 +294,13 @@ private let canvasBounds = CanvasBounds(min: 0, max: 1)
         }
     }
 }
+
+@Test func canvasFilledLineHandlesFiniteAxisBoundsWithOverflowingSpan() {
+    let huge = Double.greatestFiniteMagnitude
+    var buffer = Buffer(width: 3, height: 3)
+    Canvas(xBounds: CanvasBounds(min: -huge, max: huge), yBounds: canvasBounds, marker: .block) { context in
+        context.filledLine(
+            from: CanvasPoint(x: -huge, y: 1), to: CanvasPoint(x: huge, y: 1), baseline: 0)
+    }.render(in: buffer.area, buffer: &buffer)
+    #expect(buffer.plainText == "███\n███\n███")
+}

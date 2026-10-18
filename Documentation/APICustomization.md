@@ -106,8 +106,8 @@ they do not claim compatibility with arbitrary raw terminal protocols.
 
 ## Validation
 
-The integrated suite has 314 tests. On macOS, formatter lint, all tests, all four
+The integrated suite has 315 tests. On macOS, formatter lint, all tests, all four
 example builds, and the demo/browser/widget/viewport PTY checks pass. In an
-isolated Linux Swift 6.4.1 container, all 314 tests pass separately under `C` and
+isolated Linux Swift 6.4.1 container, all 315 tests pass separately under `C` and
 `C.UTF-8`, and the updated widget PTY check passes. The checked-in CI matrix also
 builds/tests Windows; local macOS/Linux results do not substitute for that job.
