@@ -128,6 +128,15 @@ try:
          and 'Reverse + auto-height' in screen.text and 'Table row margins' in screen.text)
     assert '╦' in screen.text or '╤' in screen.text, 'merged junction missing'
     send(b'd', 'selected: 36')
+    send(b'p', lambda: 'loom plots' in screen.text and 'Sparkline: requests' in screen.text
+         and 'BarChart: workers' in screen.text and 'Chart: throughput' in screen.text
+         and 'Canvas: layered shapes' in screen.text and 'October 2026' in screen.text)
+    assert any('\u2800' <= char <= '\u28ff' for char in screen.text), 'plot raster missing'
+    assert '█' in screen.text, 'bar or sparkline data missing'
+    resize(54, 18, 'loom plots')
+    resize(8, 3, 'loom plo')
+    resize(100, 24, 'October 2026')
+    send(b'p', 'selected: 36')
     os.write(master, b'\x1b')
     wait_for(lambda: b'\x1b[?1049l' in output, 'exit restores alternate screen')
     process.wait(timeout=8)
@@ -137,7 +146,7 @@ try:
     assert b'\x1b[?1049l' in output, 'alternate screen was not restored'
     assert b'\x1b[?1006l' in output, 'mouse capture was not released'
     assert termios.tcgetattr(slave) == original, 'terminal settings were not restored'
-    print('Widgets PTY passed: composition, navigation, stable-ID sort/filter, log scroll, resize, cleanup')
+    print('Widgets PTY passed: composition, navigation, stable-ID sort/filter, log scroll, plots/calendar, resize, cleanup')
 finally:
     if process.poll() is None:
         process.kill()

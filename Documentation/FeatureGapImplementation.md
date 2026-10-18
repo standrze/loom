@@ -151,6 +151,9 @@ layout caching/overlap, custom and merged borders, shadows, measured reverse
 collections, row margins, wrapping controls, extended styles, buffer operations,
 and semantic ANSI/headless backends. Its validation is recorded separately.
 
-Chart/BarChart/Canvas, calendar, forms/tree/file picker, native Windows support,
-arbitrary graphics/diff escape hooks, incremental Markdown parsing, and full
-Markdown table presentation remain outside these implementations.
+The [plotting and calendar increment](Plotting.md) adds Sparkline, grouped
+BarChart, Cartesian Chart, coordinate Canvas, and MonthlyCalendar. These widget
+families are no longer missing. Native Windows support, arbitrary graphics/diff
+escape hooks, incremental Markdown parsing, and full Markdown table presentation
+remain outside these implementations. Forms/tree/file pickers are optional
+ecosystem additions rather than core widget parity requirements.

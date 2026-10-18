@@ -4,7 +4,9 @@ import loom
 /// Deterministic logical cells for external review tools; no terminal session or ANSI output.
 enum WidgetSnapshot {
     static func exportIfRequested(arguments: [String]) throws -> Bool {
-        guard arguments.first == "--snapshot" || arguments.first == "--snapshot-details" else { return false }
+        guard ["--snapshot", "--snapshot-details", "--snapshot-plots"].contains(arguments.first ?? "") else {
+            return false
+        }
         guard arguments.count == 3, let width = Int(arguments[1]), let height = Int(arguments[2]),
             (1...1000).contains(width), (1...1000).contains(height), width * height <= 250_000
         else {
@@ -20,6 +22,8 @@ enum WidgetSnapshot {
         if arguments.first == "--snapshot-details" {
             var details = WidgetsDetails()
             details.render(&frame)
+        } else if arguments.first == "--snapshot-plots" {
+            WidgetsPlots().render(&frame)
         } else {
             application.render(&frame)
         }

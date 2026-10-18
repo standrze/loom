@@ -49,7 +49,8 @@ compose over the inherited or explicit style. Titles receive one blank cell at
 each end and use their first laid-out row. The legacy title has first priority,
 then rich titles are processed in array order. Earlier titles reserve their whole
 grapheme footprints, including blank padding; later glyphs intersecting those
-cells are omitted. There is no border intersection merging or shadow rendering.
+cells are omitted. Custom borders, explicit border intersection merging, and panel shadows are
+described in [widget and rendering details](WidgetRenderingDetails.md).
 
 Fill accepts exactly one printable grapheme of terminal width one. Wide symbols,
 zero-width graphemes, controls, empty strings, and multiple graphemes are ignored.
@@ -63,3 +64,6 @@ outside the assigned area and never leaves a continuation without its leader.
 Unicode boundaries, tab hit geometry, and title precedence. Logical cell tests do
 not establish terminal font appearance; the integration demo and PTY checks cover
 separate rendering and interaction behavior.
+
+The [plotting and calendar guide](Plotting.md) covers Sparkline, BarChart, Chart,
+Canvas, and MonthlyCalendar.

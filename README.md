@@ -15,7 +15,7 @@ writes the changes through [weft](https://github.com/standrze/weft).
 | Rendering | Double-buffered frames, cell diffs, fixed/inline viewports, snapshots, ANSI/headless backends |
 | Text | Unicode cell geometry, wrapping, selection, editable documents, undo/redo |
 | Content | Markdown rendered with Swift Markdown, styled spans, code blocks |
-| Widgets | Lists, tables, scrollbars, rich panels, gauges, tabs, menus, text inputs, document views |
+| Widgets | Lists, tables, panels, gauges, tabs, charts, Canvas, calendar, menus, text inputs, document views |
 | Interaction | Stable selection, multiselect, scrolling, focus scopes, key bindings and help |
 | Detail | Character art, color blending, symbol animation, terminal color fallbacks |
 
@@ -81,7 +81,8 @@ style patches, flexible layout, examples, and the validation record. Press **d**
 for custom/merged borders, shadows, measured reverse lists, table margins, and
 extended text styles. [Widget and rendering details](Documentation/WidgetRenderingDetails.md)
 covers wrapping controls, layout caching/overlap, buffer operations, and the
-ANSI/headless backend interface.
+ANSI/headless backend interface. Press **p** for Sparkline, grouped BarChart,
+Cartesian Chart, layered Canvas, and a monthly calendar; see [plotting and calendars](Documentation/Plotting.md).
 
 [Viewport documentation](Documentation/Viewports.md) covers fixed regions,
 primary-screen inline output, snapshots, and failure recovery. Run `swift run loom-viewports` for the primary-screen inline example, or add
