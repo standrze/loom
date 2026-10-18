@@ -250,6 +250,7 @@ public struct Buffer: Sendable {
     var hasSkippedCells: Bool { cells.contains { $0.diffPolicy == .skip } }
 
     /// Resolves complete old and new glyph protection in linear time per row.
+    ///
     /// `origin` maps this buffer's coordinates into the previous physical buffer.
     func presentationMask(row: Int, previous: Buffer?, origin: Point = Point(x: 0, y: 0)) -> [Bool] {
         var skipPrefix = Array(repeating: 0, count: width + 1)
